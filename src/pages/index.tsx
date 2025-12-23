@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Page, Calendar, List, Button, Text, Checkbox } from 'zmp-ui';
 import dayjs, { Dayjs } from 'dayjs';
-import { getUserInfo } from 'zmp-sdk/apis';  // Named imports
+import { showToast } from 'zmp-sdk/apis';  // Toast feedback
 
 interface Slot {
   id: number;
@@ -10,7 +10,7 @@ interface Slot {
   price: number;
 }
 
-// Custom Badge (thay zmp-ui Badge để tránh lỗi export – style đơn giản)
+// Custom Badge
 const CustomBadge = ({ color, children }: { color: string; children: React.ReactNode }) => (
   <span style={{ background: color, padding: '4px 8px', borderRadius: '4px', color: 'white', fontSize: '12px' }}>
     {children}
@@ -22,7 +22,6 @@ const HomePage = () => {
   const [slots, setSlots] = useState<Slot[]>([]);
   const [availableDates, setAvailableDates] = useState<string[]>([]);
   const [selectedSlots, setSelectedSlots] = useState<number[]>([]);
-  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     // Fetch lịch tất cả ngày từ backend
@@ -32,12 +31,20 @@ const HomePage = () => {
       .catch(err => console.error('Fetch error:', err));
   }, []);
 
-
   const onSelect = (date: Date) => {
-    setSelectedDate(dayjs(date));
-    setSelectedSlots([]); // Reset chọn
+    const newDate = dayjs(date);
+    const currentDateStr = selectedDate.format('YYYY-MM-DD');
+    const newDateStr = newDate.format('YYYY-MM-DD');
+
+    setSelectedDate(newDate);
+
+    // Only reset selected slots if changing to a different day
+    if (newDateStr !== currentDateStr) {
+      setSelectedSlots([]);
+    }
+
     // Fetch slots ngày từ backend
-    fetch(`https://pes-pickleball-backend.vercel.app/api/schedule-date?date=${dayjs(date).format('YYYY-MM-DD')}`)
+    fetch(`https://pes-pickleball-backend.vercel.app/api/schedule-date?date=${newDateStr}`)
       .then(res => res.json())
       .then(daySlots => setSlots(daySlots))
       .catch(err => console.error('Fetch error:', err));
@@ -59,8 +66,12 @@ const HomePage = () => {
   const toggleSlot = (slotId: number, checked: boolean) => {
     if (checked) {
       setSelectedSlots([...selectedSlots, slotId]);
+      // @ts-ignore  // Fix duration prop
+      showToast({ message: 'Đã thêm slot', duration: 1500 });
     } else {
       setSelectedSlots(selectedSlots.filter(id => id !== slotId));
+      // @ts-ignore  // Fix duration prop
+      showToast({ message: 'Đã xóa slot', duration: 1500 });
     }
   };
 
@@ -92,7 +103,7 @@ const HomePage = () => {
           <List.Item key={slot.id} className="p-4 border-b">
             <div className="flex justify-between items-center">
               <Checkbox
-                value={slot.id.toString()}  // Fix prop 'value'
+                value={slot.id.toString()}
                 checked={selectedSlots.includes(slot.id)}
                 onChange={(e) => toggleSlot(slot.id, e.target.checked)}
                 disabled={!slot.available}
@@ -108,12 +119,9 @@ const HomePage = () => {
         ))}
         {slots.length === 0 && <Text className="text-center text-gray-500">Không có giờ trống</Text>}
       </List>
-      {selectedSlots.length > 0 && (
-        <Button color="primary" onClick={handleBook} className="mt-4">
-          Thanh toán {selectedSlots.length} slot ({slots.filter(s => selectedSlots.includes(s.id)).reduce((sum, s) => sum + s.price, 0).toLocaleString()}đ)
-        </Button>
-      )}
-
+      <Button color="primary" onClick={handleBook} disabled={selectedSlots.length === 0} className="mt-4">
+        Thanh toán {selectedSlots.length} slot ({selectedSlots.length > 0 ? slots.filter(s => selectedSlots.includes(s.id)).reduce((sum, s) => sum + s.price, 0).toLocaleString() : '0'}đ)
+      </Button>
     </Page>
   );
 };

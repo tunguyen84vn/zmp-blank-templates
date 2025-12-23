@@ -17,6 +17,9 @@ dayjs.locale('vi');  // Tiếng Việt for date
 // ZMP Router for navigation
 import { ZMPRouter } from 'zmp-ui';
 
+// Jotai Provider for state (fixed import)
+import { Provider } from 'jotai';  // Correct Jotai provider name
+
 // Pages
 import Home from './pages/index';  // Home page (lịch sân)
 
@@ -28,10 +31,13 @@ if (!window.APP_CONFIG) {
   window.APP_CONFIG = appConfig as any;
 }
 
+// Consolidated Layout (no duplicates, no path prop)
 const Layout = () => (
-  <ZMPRouter>
-    <Home />  // Single view - use navigateTo for admin
-  </ZMPRouter>
+  <Provider>
+    <ZMPRouter>
+      <Home />  // Single view - use navigateTo for admin
+    </ZMPRouter>
+  </Provider>
 );
 
 const root = createRoot(document.getElementById("app")!);
