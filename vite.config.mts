@@ -8,6 +8,9 @@ export default () => {
     root: "./src",
     base: "",
     plugins: [zaloMiniApp(), react()],
+    optimizeDeps: {
+    include: ['zmp-sdk/apis']  // Force bundle apis
+    },
     build: {
       assetsInlineLimit: 0,
     },
