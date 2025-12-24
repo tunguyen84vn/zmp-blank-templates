@@ -8,6 +8,7 @@ interface Slot {
   time: string;
   available: boolean;
   price: number;
+  date: string;  // Thêm date để phân biệt multi-day
 }
 
 // Custom Badge
@@ -21,7 +22,8 @@ const HomePage = () => {
   const [selectedDate, setSelectedDate] = useState<Dayjs>(dayjs());
   const [slots, setSlots] = useState<Slot[]>([]);
   const [availableDates, setAvailableDates] = useState<string[]>([]);
-  const [selectedSlots, setSelectedSlots] = useState<number[]>([]);
+  const [selectedSlots, setSelectedSlots] = useState<Slot[]>([]);  // Lưu full slot object
+  const [selectedDates, setSelectedDates] = useState<string[]>([]);  // Ngày đã chọn slot
 
   useEffect(() => {
     // Fetch lịch tất cả ngày từ backend
@@ -32,29 +34,33 @@ const HomePage = () => {
   }, []);
 
   const onSelect = (date: Date) => {
-    const newDate = dayjs(date);
-    const currentDateStr = selectedDate.format('YYYY-MM-DD');
-    const newDateStr = newDate.format('YYYY-MM-DD');
-
-    setSelectedDate(newDate);
-
-    // Only reset selected slots if changing to a different day
-    if (newDateStr !== currentDateStr) {
-      setSelectedSlots([]);
-    }
-
-    // Fetch slots ngày từ backend
-    fetch(`https://pes-pickleball-backend.vercel.app/api/schedule-date?date=${newDateStr}`)
+    setSelectedDate(dayjs(date));
+    // Fetch slots cho ngày mới
+    fetch(`https://pes-pickleball-backend.vercel.app/api/schedule-date?date=${dayjs(date).format('YYYY-MM-DD')}`)
       .then(res => res.json())
-      .then(daySlots => setSlots(daySlots))
+      .then(daySlots => {
+        // Thêm date vào mỗi slot
+        const slotsWithDate = daySlots.map((slot: any) => ({
+          ...slot,
+          date: dayjs(date).format('YYYY-MM-DD')
+        }));
+        setSlots(slotsWithDate);
+      })
       .catch(err => console.error('Fetch error:', err));
   };
 
   const cellRender = (date: Date) => {
     const dayStr = dayjs(date).format('YYYY-MM-DD');
     const isAvailable = availableDates.includes(dayStr);
+    const isSelected = selectedDates.includes(dayStr);  // Highlight ngày đã chọn slot
+
     return (
-      <div style={{ background: isAvailable ? '#4CAF50' : '#f0f0f0', padding: '4px', borderRadius: '4px' }}>
+      <div style={{
+        background: isSelected ? '#FF9800' : (isAvailable ? '#4CAF50' : '#f0f0f0'),  // Cam cho ngày đã chọn, xanh cho trống
+        padding: '4px',
+        borderRadius: '4px',
+        fontWeight: isSelected ? 'bold' : 'normal'
+      }}>
         {dayjs(date).date()}
         {isAvailable && <CustomBadge color="#4CAF50">Trống</CustomBadge>}
       </div>
@@ -63,32 +69,40 @@ const HomePage = () => {
 
   const disabledDate = (date: Date) => date < dayjs().toDate();
 
-  const toggleSlot = (slotId: number, checked: boolean) => {
+  const toggleSlot = (slot: Slot, checked: boolean) => {
+    let newSelected = [...selectedSlots];
     if (checked) {
-      setSelectedSlots([...selectedSlots, slotId]);
+      newSelected.push(slot);
       // @ts-ignore  // Fix duration prop
       showToast({ message: 'Đã thêm slot', duration: 1500 });
     } else {
-      setSelectedSlots(selectedSlots.filter(id => id !== slotId));
+      newSelected = newSelected.filter(s => s.id !== slot.id || s.date !== slot.date);
       // @ts-ignore  // Fix duration prop
       showToast({ message: 'Đã xóa slot', duration: 1500 });
     }
+    setSelectedSlots(newSelected);
+
+    // Cập nhật selectedDates
+    const datesWithSlots = newSelected.map(s => s.date);
+    setSelectedDates([...new Set(datesWithSlots)]);  // Unique dates
   };
 
   const handleBook = () => {
     if (selectedSlots.length > 0) {
-      const chosen = slots.filter(s => selectedSlots.includes(s.id));
-      const total = chosen.reduce((sum, s) => sum + s.price, 0);
+      const total = selectedSlots.reduce((sum, s) => sum + s.price, 0);
       alert(`Đặt ${selectedSlots.length} slot thành công! Tổng giá: ${total.toLocaleString()}đ`);
-      setSelectedSlots([]); // Reset giỏ
+      setSelectedSlots([]);
+      setSelectedDates([]); // Reset highlight
       // Sau gọi VNPay backend
     }
   };
 
+  const totalPrice = selectedSlots.reduce((sum, s) => sum + s.price, 0);
+
   return (
     <Page className="flex flex-col p-4 space-y-4 bg-white dark:bg-black">
       <Text.Header className="text-center text-xl font-bold">Đặt Sân Pickleball (24/24)</Text.Header>
-      <Text className="text-center text-gray-500">Chọn ngày để xem giờ trống</Text>
+      <Text className="text-center text-gray-500">Chọn nhiều slot từ nhiều ngày</Text>
       <Calendar
         value={selectedDate.toDate()}
         cellRender={cellRender}
@@ -100,12 +114,12 @@ const HomePage = () => {
       <Text className="text-center text-lg font-semibold">Giờ trống ngày {selectedDate.format('DD/MM/YYYY')}</Text>
       <List className="rounded-lg overflow-hidden">
         {slots.map(slot => (
-          <List.Item key={slot.id} className="p-4 border-b">
+          <List.Item key={`${slot.id}-${slot.date}`} className="p-4 border-b">
             <div className="flex justify-between items-center">
               <Checkbox
-                value={slot.id.toString()}
-                checked={selectedSlots.includes(slot.id)}
-                onChange={(e) => toggleSlot(slot.id, e.target.checked)}
+                value={`${slot.id}-${slot.date}`}
+                checked={selectedSlots.some(s => s.id === slot.id && s.date === slot.date)}
+                onChange={(e) => toggleSlot(slot, e.target.checked)}
                 disabled={!slot.available}
               />
               <p className="text-lg">{slot.time} (1 tiếng)</p>
@@ -119,9 +133,13 @@ const HomePage = () => {
         ))}
         {slots.length === 0 && <Text className="text-center text-gray-500">Không có giờ trống</Text>}
       </List>
-      <Button color="primary" onClick={handleBook} disabled={selectedSlots.length === 0} className="mt-4">
-        Thanh toán {selectedSlots.length} slot ({selectedSlots.length > 0 ? slots.filter(s => selectedSlots.includes(s.id)).reduce((sum, s) => sum + s.price, 0).toLocaleString() : '0'}đ)
-      </Button>
+      {selectedSlots.length > 0 && (
+        <div className="sticky bottom-0 bg-white p-4 border-t shadow-lg">
+          <Button color="primary" onClick={handleBook} className="w-full">
+            Thanh toán {selectedSlots.length} slot ({totalPrice.toLocaleString()}đ)
+          </Button>
+        </div>
+      )}
     </Page>
   );
 };
