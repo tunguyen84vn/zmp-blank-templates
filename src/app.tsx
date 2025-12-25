@@ -15,15 +15,16 @@ import 'dayjs/locale/vi';
 dayjs.locale('vi');  // Tiếng Việt for date
 
 // ZMP Router for navigation
-import { ZMPRouter } from 'zmp-ui';
+import { ZMPRouter, Route } from 'zmp-ui';
+import { Routes } from 'react-router-dom';
 
-// Jotai Provider for state (fixed import)
-import { Provider } from 'jotai';  // Correct Jotai provider name
+// Jotai Provider for state
+import { Provider } from 'jotai';
 
 // Pages
-import Home from './pages/index';  // Home page (lịch sân)
+import Home from './pages/index';           // Home page
+import Summary from './pages/SummaryPage';   // Trang tóm tắt
 
-// Mount the app
 // Expose app configuration
 import appConfig from "../app-config.json";
 
@@ -31,11 +32,14 @@ if (!window.APP_CONFIG) {
   window.APP_CONFIG = appConfig as any;
 }
 
-// Consolidated Layout (no duplicates, no path prop)
+// Layout với routes
 const Layout = () => (
   <Provider>
     <ZMPRouter>
-      <Home />  // Single view - use navigateTo for admin
+      <Routes>
+        <Route path="/" Component={Home} />
+        <Route path="/summary" Component={Summary} />
+      </Routes>
     </ZMPRouter>
   </Provider>
 );

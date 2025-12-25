@@ -1,8 +1,12 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Page, Calendar, List, Button, Text, Checkbox, Spinner } from 'zmp-ui';
+import { Page, Calendar, List, Button, Text, Checkbox, Spinner, useNavigate } from 'zmp-ui';
 import dayjs, { Dayjs } from 'dayjs';
 import { showToast } from 'zmp-sdk/apis';
 import _debounce from 'lodash/debounce'; // yarn add lodash
+
+// Import Jotai và atom giỏ hàng
+import { useAtom } from 'jotai';
+import { selectedSlotsAtom } from '../store/cart'; // ← Điều chỉnh path nếu file store nằm chỗ khác
 
 interface Slot {
   id: number;
@@ -20,13 +24,16 @@ const CustomBadge = ({ color, children }: { color: string; children: React.React
 );
 
 const HomePage = () => {
+  const navigate = useNavigate();
+
   const [selectedDate, setSelectedDate] = useState<Dayjs>(dayjs());
   const [slots, setSlots] = useState<Slot[]>([]);
-  const [selectedSlots, setSelectedSlots] = useState<Slot[]>([]);
+  // Thay useState bằng useAtom để giỏ hàng toàn cục
+  const [selectedSlots, setSelectedSlots] = useAtom(selectedSlotsAtom);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [slotsCache, setSlotsCache] = useState<{ [date: string]: Slot[] }>({});
-  const [currentMonth, setCurrentMonth] = useState<Dayjs>(dayjs()); // Theo dõi tháng đang xem
+  const [currentMonth, setCurrentMonth] = useState<Dayjs>(dayjs());
 
   const onSelect = useCallback(
     _debounce((date: Date) => {
@@ -65,10 +72,8 @@ const HomePage = () => {
     const newMonth = dayjs(date);
     setCurrentMonth(newMonth);
 
-    // Tự động chọn ngày đầu tiên hợp lệ của tháng mới
     let targetDate = newMonth.startOf('month');
 
-    // Nếu ngày 1 bị disable, tìm ngày hợp lệ tiếp theo trong tháng
     if (disabledDate(targetDate.toDate())) {
       targetDate = targetDate.add(1, 'day');
       while (disabledDate(targetDate.toDate()) && targetDate.isSame(newMonth, 'month')) {
@@ -76,10 +81,9 @@ const HomePage = () => {
       }
     }
 
-    // Cập nhật nếu ngày mới khác ngày hiện tại
     if (!targetDate.isSame(selectedDate, 'day')) {
       setSelectedDate(targetDate);
-      onSelect(targetDate.toDate()); // Load slots ngay
+      onSelect(targetDate.toDate());
     }
   };
 
@@ -90,7 +94,6 @@ const HomePage = () => {
     const dayStr = selectedDay.format('YYYY-MM-DD');
     const hasSelected = selectedSlots.some(s => s.date === dayStr);
 
-    // Ngày ngoài range: không tô màu đặc biệt
     if (selectedDay.isBefore(currentDate, 'day') ||
         selectedDay.isAfter(currentDate.add(3, 'month'), 'day')) {
       return (
@@ -103,7 +106,6 @@ const HomePage = () => {
       );
     }
 
-    // Ngày hợp lệ
     let background = hasSelected ? '#FF9800' : '#4CAF50';
 
     return (
@@ -136,7 +138,7 @@ const HomePage = () => {
     const today = dayjs();
     return (
       dayjs(current).isBefore(today, 'day') ||
-      dayjs(current).isAfter(today.add(90, 'day'), 'day') // 90 ngày kể từ hôm nay
+      dayjs(current).isAfter(today.add(90, 'day'), 'day')
     );
   };
 
@@ -150,7 +152,7 @@ const HomePage = () => {
     });
     // @ts-ignore
     showToast({ message: checked ? 'Đã thêm slot' : 'Đã xóa slot', duration: 1500 });
-  }, []);
+  }, [setSelectedSlots]); // Thêm dependency
 
   const totalPrice = useMemo(() => {
     return selectedSlots.reduce((sum, s) => sum + s.price, 0);
@@ -158,9 +160,7 @@ const HomePage = () => {
 
   const handleBook = () => {
     if (selectedSlots.length > 0) {
-      alert(`Đặt ${selectedSlots.length} slot thành công! Tổng giá: ${totalPrice.toLocaleString()}đ`);
-      setSelectedSlots([]); // Reset giỏ
-      // TODO: Gọi API VNPay hoặc backend booking thực tế
+      navigate('/summary', { state: { selectedSlots } });
     }
   };
 
@@ -213,7 +213,6 @@ const HomePage = () => {
         )}
       </div>
 
-      {/* Fixed Thanh toán button */}
       <div className="sticky bottom-0 bg-white p-4 border-t shadow-lg">
         <Button
           color="primary"
