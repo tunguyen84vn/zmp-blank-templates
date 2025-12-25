@@ -22,34 +22,13 @@ const CustomBadge = ({ color, children }: { color: string; children: React.React
 const HomePage = () => {
   const [selectedDate, setSelectedDate] = useState<Dayjs>(dayjs());
   const [slots, setSlots] = useState<Slot[]>([]);
-  const [availableDates, setAvailableDates] = useState<string[]>([]);
   const [selectedSlots, setSelectedSlots] = useState<Slot[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [slotsCache, setSlotsCache] = useState<{ [date: string]: Slot[] }>({}); // Cache per date
+  const [slotsCache, setSlotsCache] = useState<{ [date: string]: Slot[] }>({});
+  const [currentMonth, setCurrentMonth] = useState<Dayjs>(dayjs()); // Theo dõi tháng đang xem
 
-  useEffect(() => {
-    const cachedDates = localStorage.getItem('availableDates');
-    if (cachedDates) {
-      setAvailableDates(JSON.parse(cachedDates));
-    } else {
-      setLoading(true);
-      fetch('https://pes-pickleball-backend.vercel.app/api/schedule')
-        .then(res => res.json())
-        .then(data => {
-          const dates = data.map((day: any) => day.date);
-          setAvailableDates(dates);
-          localStorage.setItem('availableDates', JSON.stringify(dates));
-          setLoading(false);
-        })
-        .catch(err => {
-          setError('Lỗi tải lịch ngày');
-          setLoading(false);
-        });
-    }
-  }, []);
-
-  const debouncedOnSelect = useCallback(
+  const onSelect = useCallback(
     _debounce((date: Date) => {
       const newDate = dayjs(date);
       setSelectedDate(newDate);
@@ -78,22 +57,54 @@ const HomePage = () => {
           setError('Lỗi tải slots giờ');
           setLoading(false);
         });
-    }, 300), // Delay 300ms to avoid rapid clicks
+    }, 300),
     [slotsCache]
   );
 
-  const onSelect = (date: Date) => {
-    debouncedOnSelect(date);
+  const handlePanelChange = (date: Date) => {
+    const newMonth = dayjs(date);
+    setCurrentMonth(newMonth);
+
+    // Tự động chọn ngày đầu tiên hợp lệ của tháng mới
+    let targetDate = newMonth.startOf('month');
+
+    // Nếu ngày 1 bị disable, tìm ngày hợp lệ tiếp theo trong tháng
+    if (disabledDate(targetDate.toDate())) {
+      targetDate = targetDate.add(1, 'day');
+      while (disabledDate(targetDate.toDate()) && targetDate.isSame(newMonth, 'month')) {
+        targetDate = targetDate.add(1, 'day');
+      }
+    }
+
+    // Cập nhật nếu ngày mới khác ngày hiện tại
+    if (!targetDate.isSame(selectedDate, 'day')) {
+      setSelectedDate(targetDate);
+      onSelect(targetDate.toDate()); // Load slots ngay
+    }
   };
 
   const cellRender = (date: Date) => {
-    const dayStr = dayjs(date).format('YYYY-MM-DD');
-    const isAvailable = availableDates.includes(dayStr);
+    const currentDate = dayjs();
+    const selectedDay = dayjs(date);
+
+    const dayStr = selectedDay.format('YYYY-MM-DD');
     const hasSelected = selectedSlots.some(s => s.date === dayStr);
 
-    let background = '#f0f0f0';
-    if (hasSelected) background = '#FF9800'; // Orange for selected day
-    else if (isAvailable) background = '#4CAF50'; // Green for available
+    // Ngày ngoài range: không tô màu đặc biệt
+    if (selectedDay.isBefore(currentDate, 'day') ||
+        selectedDay.isAfter(currentDate.add(3, 'month'), 'day')) {
+      return (
+        <div style={{
+          padding: '4px',
+          borderRadius: '4px',
+        }}>
+          {selectedDay.date()}
+        </div>
+      );
+    }
+
+    // Ngày hợp lệ
+    let background = hasSelected ? '#FF9800' : '#4CAF50';
 
     return (
       <div style={{
@@ -103,14 +114,31 @@ const HomePage = () => {
         fontWeight: hasSelected ? 'bold' : 'normal',
         position: 'relative'
       }}>
-        {dayjs(date).date()}
-        {isAvailable && <span style={{ position: 'absolute', bottom: '2px', right: '2px', fontSize: '8px', color: '#4CAF50' }}>●</span>}
-        {hasSelected && <span style={{ position: 'absolute', top: '2px', right: '2px', fontSize: '8px', color: '#FF9800' }}>●</span>}
+        {selectedDay.date()}
+        {hasSelected && (
+          <span
+            style={{
+              position: 'absolute',
+              top: '2px',
+              right: '2px',
+              fontSize: '8px',
+              color: '#FF9800'
+            }}
+          >
+            ●
+          </span>
+        )}
       </div>
     );
   };
 
-  const disabledDate = (date: Date) => date < dayjs().toDate();
+  const disabledDate = (current: Date) => {
+    const today = dayjs();
+    return (
+      dayjs(current).isBefore(today, 'day') ||
+      dayjs(current).isAfter(today.add(89, 'day'), 'day') // 90 ngày kể từ hôm nay
+    );
+  };
 
   const toggleSlot = useCallback((slot: Slot, checked: boolean) => {
     setSelectedSlots(prev => {
@@ -132,6 +160,7 @@ const HomePage = () => {
     if (selectedSlots.length > 0) {
       alert(`Đặt ${selectedSlots.length} slot thành công! Tổng giá: ${totalPrice.toLocaleString()}đ`);
       setSelectedSlots([]); // Reset giỏ
+      // TODO: Gọi API VNPay hoặc backend booking thực tế
     }
   };
 
@@ -146,9 +175,12 @@ const HomePage = () => {
           onSelect={onSelect}
           disabledDate={disabledDate}
           fullscreen={true}
+          onPanelChange={handlePanelChange}
           style={{ borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}
         />
-        <Text className="text-center text-lg font-semibold">Giờ trống ngày {selectedDate.format('DD/MM/YYYY')}</Text>
+        <Text className="text-center text-lg font-semibold">
+          Giờ trống ngày {selectedDate.format('DD/MM/YYYY')}
+        </Text>
         {error && <Text className="text-center text-red-500">{error}</Text>}
         {loading ? (
           <div className="flex justify-center items-center h-32">
@@ -174,16 +206,23 @@ const HomePage = () => {
                 </div>
               </List.Item>
             ))}
-            {slots.length === 0 && <Text className="text-center text-gray-500">Không có giờ trống</Text>}
+            {slots.length === 0 && !loading && (
+              <Text className="text-center text-gray-500">Không có giờ trống</Text>
+            )}
           </List>
         )}
       </div>
 
       {/* Fixed Thanh toán button */}
       <div className="sticky bottom-0 bg-white p-4 border-t shadow-lg">
-        <Button color="primary" onClick={handleBook} disabled={selectedSlots.length === 0} className="w-full">
-          {selectedSlots.length === 0 
-            ? 'Chọn slot để thanh toán' 
+        <Button
+          color="primary"
+          onClick={handleBook}
+          disabled={selectedSlots.length === 0}
+          className="w-full"
+        >
+          {selectedSlots.length === 0
+            ? 'Chọn slot để thanh toán'
             : `Thanh toán ${selectedSlots.length} slot (${totalPrice.toLocaleString()}đ)`}
         </Button>
       </div>
