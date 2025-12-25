@@ -136,7 +136,7 @@ const HomePage = () => {
     const today = dayjs();
     return (
       dayjs(current).isBefore(today, 'day') ||
-      dayjs(current).isAfter(today.add(89, 'day'), 'day') // 90 ngày kể từ hôm nay
+      dayjs(current).isAfter(today.add(90, 'day'), 'day') // 90 ngày kể từ hôm nay
     );
   };
 
