@@ -28,15 +28,21 @@ const HomePage = () => {
 
   const [selectedDate, setSelectedDate] = useState<Dayjs>(dayjs());
   const [slots, setSlots] = useState<Slot[]>([]);
-  // Thay useState bằng useAtom để giỏ hàng toàn cục
   const [selectedSlots, setSelectedSlots] = useAtom(selectedSlotsAtom);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [slotsCache, setSlotsCache] = useState<{ [date: string]: Slot[] }>({});
   const [currentMonth, setCurrentMonth] = useState<Dayjs>(dayjs());
 
+  // Load slot cho ngày mặc định khi app mount
+  useEffect(() => {
+    onSelect(selectedDate.toDate()); // Load lần đầu
+  }, []); // Chạy 1 lần
+
   const onSelect = useCallback(
     _debounce((date: Date) => {
+      if (loading) return; // Ngăn load lặp
+
       const newDate = dayjs(date);
       setSelectedDate(newDate);
       setLoading(true);
@@ -64,7 +70,7 @@ const HomePage = () => {
           setError('Lỗi tải slots giờ');
           setLoading(false);
         });
-    }, 300),
+    }, 500), // Tăng debounce để giảm load lặp
     [slotsCache]
   );
 
@@ -83,7 +89,8 @@ const HomePage = () => {
 
     if (!targetDate.isSame(selectedDate, 'day')) {
       setSelectedDate(targetDate);
-      onSelect(targetDate.toDate());
+      // Bỏ gọi onSelect ở đây để tránh load lặp khi đổi tháng
+      // User sẽ chọn ngày cụ thể để load slot
     }
   };
 
@@ -150,9 +157,8 @@ const HomePage = () => {
         return prev.filter(s => s.id !== slot.id || s.date !== slot.date);
       }
     });
-    // @ts-ignore
-    showToast({ message: checked ? 'Đã thêm slot' : 'Đã xóa slot', duration: 1500 });
-  }, [setSelectedSlots]); // Thêm dependency
+    showToast({ message: checked ? 'Đã thêm slot' : 'Đã xóa slot' });
+  }, [setSelectedSlots]);
 
   const totalPrice = useMemo(() => {
     return selectedSlots.reduce((sum, s) => sum + s.price, 0);
@@ -213,6 +219,7 @@ const HomePage = () => {
         )}
       </div>
 
+      {/* Fixed Thanh toán button */}
       <div className="sticky bottom-0 bg-white p-4 border-t shadow-lg">
         <Button
           color="primary"

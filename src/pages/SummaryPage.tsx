@@ -1,7 +1,14 @@
 import React from 'react';
 import { Page, List, Button, Text, Icon } from 'zmp-ui';
-import { useNavigate, useLocation } from 'zmp-ui'; // Hoặc từ zmp-sdk nếu cần
+import { useNavigate } from 'zmp-ui';
 import dayjs from 'dayjs';
+
+// Import showToast
+import { showToast } from 'zmp-sdk/apis';
+
+// Import Jotai để update giỏ hàng toàn cục
+import { useAtom } from 'jotai';
+import { selectedSlotsAtom } from '../store/cart'; // Điều chỉnh path nếu cần
 
 interface Slot {
   id: number;
@@ -13,10 +20,9 @@ interface Slot {
 
 const SummaryPage: React.FC = () => {
   const navigate = useNavigate();
-  const location = useLocation();
   
-  // Lấy selectedSlots từ state (khi navigate từ HomePage)
-  const selectedSlots: Slot[] = (location.state as any)?.selectedSlots || [];
+  // Sử dụng atom toàn cục làm nguồn dữ liệu chính (real-time)
+  const [selectedSlots, setSelectedSlots] = useAtom(selectedSlotsAtom);
 
   if (selectedSlots.length === 0) {
     return (
@@ -31,7 +37,7 @@ const SummaryPage: React.FC = () => {
     );
   }
 
-  // Nhóm slots theo ngày
+  // Nhóm slots theo ngày (tính từ atom, sẽ re-render khi atom thay đổi)
   const groupedByDate = selectedSlots.reduce((acc, slot) => {
     if (!acc[slot.date]) acc[slot.date] = [];
     acc[slot.date].push(slot);
@@ -41,6 +47,18 @@ const SummaryPage: React.FC = () => {
   const totalSlots = selectedSlots.length;
   const totalPrice = selectedSlots.reduce((sum, slot) => sum + slot.price, 0);
 
+  // Chức năng bỏ slot
+  const removeSlot = (removedSlot: Slot) => {
+    const updatedSlots = selectedSlots.filter(s => !(s.id === removedSlot.id && s.date === removedSlot.date));
+    setSelectedSlots(updatedSlots);
+    showToast({ message: 'Đã bỏ slot!' }); // Fixed: chỉ message
+    // Nếu bỏ hết, quay về Home
+    if (updatedSlots.length === 0) {
+      showToast({ message: 'Giỏ hàng rỗng, quay về chọn lại!' });
+      navigate(-1);
+    }
+  };
+
   return (
     <Page className="bg-gray-50 min-h-screen">
       <div className="p-4 pb-24">
@@ -49,7 +67,7 @@ const SummaryPage: React.FC = () => {
           Xác nhận đặt sân Pickleball
         </Text.Title>
 
-        {/* Thông tin sân - dùng div thay Card */}
+        {/* Thông tin sân */}
         <div className="bg-white rounded-xl shadow-md p-4 mb-6">
           <div className="flex items-center mb-3">
             <Icon icon="zi-location-solid" className="text-blue-600 mr-3 text-2xl" />
@@ -63,9 +81,9 @@ const SummaryPage: React.FC = () => {
           </Text>
         </div>
 
-        {/* Danh sách slot */}
+        {/* Danh sách slot – Thêm nút bỏ slot */}
         <Text.Title className="font-bold text-lg mb-3 text-gray-800">
-          Các khung giờ đã chọn ({totalSlots} slot)
+          Các khung giờ đã chọn ({totalSlots} slot) – Bỏ nếu không cần
         </Text.Title>
 
         {Object.entries(groupedByDate)
@@ -80,9 +98,19 @@ const SummaryPage: React.FC = () => {
                   <List.Item key={index}>
                     <div className="flex justify-between items-center py-1">
                       <Text className="text-gray-800">{slot.time}</Text>
-                      <Text className="font-medium text-green-600">
-                        {slot.price.toLocaleString('vi-VN')}đ
-                      </Text>
+                      <div className="flex items-center">
+                        <Text className="font-medium text-green-600 mr-4">
+                          {slot.price.toLocaleString('vi-VN')}đ
+                        </Text>
+                        <Button
+                          variant="tertiary"
+                          size="small"
+                          icon={<Icon icon="zi-close" />}
+                          onClick={() => removeSlot(slot)}
+                        >
+                          Bỏ
+                        </Button>
+                      </div>
                     </div>
                   </List.Item>
                 ))}
