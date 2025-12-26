@@ -58,50 +58,52 @@ const SummaryPage: React.FC = () => {
     }
   };
 
+  // Payment handler: Get user info, create order on backend, redirect to VNPay URL
   const handlePayment = async () => {
-  try {
-    // Lấy user info từ Zalo
-    const user = await getUserInfo({}) as any;
-    console.log('User info from Zalo:', user); // Debug log quan trọng!
+    try {
+      // Get user info from Zalo
+      const userResponse = await getUserInfo({});
+      console.log('User info from Zalo:', userResponse); // Debug
 
-    const userId = user.userId; // Zalo SDK trả userId
-    if (!userId) {
-      showToast({ message: 'Vui lòng đăng nhập Zalo để tiếp tục!' });
-      return;
+      // Lấy userId từ userInfo.id (theo log của bạn)
+      const userInfo = userResponse.userInfo || {};
+      const userId = userInfo.id; // Dùng 'id' thay vì 'userId'
+      const phone = ''; // Phone không có sẵn trong UserInfo
+      const name = userInfo.name || 'Unknown';
+
+      if (!userId) {
+        throw new Error('Không lấy được userId từ Zalo. Vui lòng đăng nhập lại.');
+      }
+
+      const payload = {
+        userId,
+        phone,
+        name,
+        selectedSlots,
+        guestUserIds: []
+      };
+      console.log('Sending payload to backend:', payload);
+
+      const response = await fetch('https://pes-pickleball-backend.vercel.app/api/create-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await response.json();
+      console.log('Backend response:', data);
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Create order failed');
+      }
+
+      const paymentUrl = data.paymentUrl;
+      window.location.href = paymentUrl; // Redirect to VNPay
+    } catch (err) {
+      console.error('Payment error:', err);
+      showToast({ message: 'Lỗi thanh toán, thử lại!' });
     }
-
-    const phone = user.phone || '';
-    const name = user.name || 'Unknown';
-
-    const payload = {
-      userId,
-      phone,
-      name,
-      selectedSlots,
-      guestUserIds: []
-    };
-    console.log('Sending payload:', payload); // Debug
-
-    const response = await fetch('https://pes-pickleball-backend.vercel.app/api/create-order', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-
-    const data = await response.json();
-    console.log('Backend response:', data);
-
-    if (!response.ok || !data.success) {
-      throw new Error(data.error || 'Create order failed');
-    }
-
-    const paymentUrl = data.paymentUrl;
-    window.location.href = paymentUrl;
-  } catch (err) {
-    console.error('Payment error:', err);
-    showToast({ message: 'Lỗi thanh toán, thử lại!' });
-  }
-};
+  };
 
   return (
     <Page className="bg-gray-50 min-h-screen">
