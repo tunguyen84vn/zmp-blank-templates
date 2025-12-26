@@ -219,7 +219,7 @@ const HomePage = () => {
         )}
       </div>
 
-      {/* Fixed Thanh toán button */}
+      {/* Fixed Đặt sân button */}
       <div className="sticky bottom-0 bg-white p-4 border-t shadow-lg">
         <Button
           color="primary"
@@ -228,8 +228,8 @@ const HomePage = () => {
           className="w-full"
         >
           {selectedSlots.length === 0
-            ? 'Chọn slot để thanh toán'
-            : `Thanh toán ${selectedSlots.length} slot (${totalPrice.toLocaleString()}đ)`}
+            ? 'Chọn slot để đặt sân'
+            : `Đặt sân ${selectedSlots.length} slot (${totalPrice.toLocaleString()}đ)`}
         </Button>
       </div>
     </Page>

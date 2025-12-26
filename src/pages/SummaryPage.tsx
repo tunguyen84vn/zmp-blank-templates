@@ -3,12 +3,12 @@ import { Page, List, Button, Text, Icon } from 'zmp-ui';
 import { useNavigate } from 'zmp-ui';
 import dayjs from 'dayjs';
 
-// Import showToast
-import { showToast } from 'zmp-sdk/apis';
+// Import showToast and getUserInfo
+import { showToast, getUserInfo } from 'zmp-sdk/apis';
 
-// Import Jotai để update giỏ hàng toàn cục
+// Import Jotai to update global cart
 import { useAtom } from 'jotai';
-import { selectedSlotsAtom } from '../store/cart'; // Điều chỉnh path nếu cần
+import { selectedSlotsAtom } from '../store/cart'; // Adjust path if needed
 
 interface Slot {
   id: number;
@@ -21,7 +21,7 @@ interface Slot {
 const SummaryPage: React.FC = () => {
   const navigate = useNavigate();
   
-  // Sử dụng atom toàn cục làm nguồn dữ liệu chính (real-time)
+  // Use global atom for real-time cart
   const [selectedSlots, setSelectedSlots] = useAtom(selectedSlotsAtom);
 
   if (selectedSlots.length === 0) {
@@ -37,7 +37,7 @@ const SummaryPage: React.FC = () => {
     );
   }
 
-  // Nhóm slots theo ngày (tính từ atom, sẽ re-render khi atom thay đổi)
+  // Group slots by date
   const groupedByDate = selectedSlots.reduce((acc, slot) => {
     if (!acc[slot.date]) acc[slot.date] = [];
     acc[slot.date].push(slot);
@@ -47,17 +47,61 @@ const SummaryPage: React.FC = () => {
   const totalSlots = selectedSlots.length;
   const totalPrice = selectedSlots.reduce((sum, slot) => sum + slot.price, 0);
 
-  // Chức năng bỏ slot
+  // Function to remove slot
   const removeSlot = (removedSlot: Slot) => {
     const updatedSlots = selectedSlots.filter(s => !(s.id === removedSlot.id && s.date === removedSlot.date));
     setSelectedSlots(updatedSlots);
-    showToast({ message: 'Đã bỏ slot!' }); // Fixed: chỉ message
-    // Nếu bỏ hết, quay về Home
+    showToast({ message: 'Đã bỏ slot!' });
     if (updatedSlots.length === 0) {
       showToast({ message: 'Giỏ hàng rỗng, quay về chọn lại!' });
       navigate(-1);
     }
   };
+
+  const handlePayment = async () => {
+  try {
+    // Lấy user info từ Zalo
+    const user = await getUserInfo({}) as any;
+    console.log('User info from Zalo:', user); // Debug log quan trọng!
+
+    const userId = user.userId; // Zalo SDK trả userId
+    if (!userId) {
+      showToast({ message: 'Vui lòng đăng nhập Zalo để tiếp tục!' });
+      return;
+    }
+
+    const phone = user.phone || '';
+    const name = user.name || 'Unknown';
+
+    const payload = {
+      userId,
+      phone,
+      name,
+      selectedSlots,
+      guestUserIds: []
+    };
+    console.log('Sending payload:', payload); // Debug
+
+    const response = await fetch('https://pes-pickleball-backend.vercel.app/api/create-order', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await response.json();
+    console.log('Backend response:', data);
+
+    if (!response.ok || !data.success) {
+      throw new Error(data.error || 'Create order failed');
+    }
+
+    const paymentUrl = data.paymentUrl;
+    window.location.href = paymentUrl;
+  } catch (err) {
+    console.error('Payment error:', err);
+    showToast({ message: 'Lỗi thanh toán, thử lại!' });
+  }
+};
 
   return (
     <Page className="bg-gray-50 min-h-screen">
@@ -67,7 +111,7 @@ const SummaryPage: React.FC = () => {
           Xác nhận đặt sân Pickleball
         </Text.Title>
 
-        {/* Thông tin sân */}
+        {/* Venue info */}
         <div className="bg-white rounded-xl shadow-md p-4 mb-6">
           <div className="flex items-center mb-3">
             <Icon icon="zi-location-solid" className="text-blue-600 mr-3 text-2xl" />
@@ -81,7 +125,7 @@ const SummaryPage: React.FC = () => {
           </Text>
         </div>
 
-        {/* Danh sách slot – Thêm nút bỏ slot */}
+        {/* Slot list with remove button */}
         <Text.Title className="font-bold text-lg mb-3 text-gray-800">
           Các khung giờ đã chọn ({totalSlots} slot) – Bỏ nếu không cần
         </Text.Title>
@@ -118,7 +162,7 @@ const SummaryPage: React.FC = () => {
             </div>
           ))}
 
-        {/* Tổng kết */}
+        {/* Total */}
         <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl shadow-md p-6 mb-8">
           <div className="flex justify-between items-center">
             <div>
@@ -131,13 +175,13 @@ const SummaryPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Lưu ý */}
+        {/* Note */}
         <Text className="text-sm text-gray-500 text-center mb-6">
           Vui lòng kiểm tra kỹ thông tin trước khi thanh toán. Hệ thống sẽ gửi mã xác nhận qua tin nhắn sau khi thanh toán thành công.
         </Text>
       </div>
 
-      {/* Nút fixed bottom */}
+      {/* Fixed bottom buttons */}
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg p-4 flex gap-4 z-10">
         <Button
           variant="secondary"
@@ -150,10 +194,7 @@ const SummaryPage: React.FC = () => {
         <Button
           color="primary"
           fullWidth
-          onClick={() => {
-            // TODO: Gọi API backend để tạo đơn + thanh toán VNPay
-            alert('Đang chuyển sang thanh toán VNPay...\n(Tích hợp thực tế sẽ gọi API)');
-          }}
+          onClick={handlePayment}
           className="flex-1"
         >
           Xác nhận & Thanh toán
