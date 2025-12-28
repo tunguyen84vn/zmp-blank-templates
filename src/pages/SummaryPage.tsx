@@ -3,12 +3,10 @@ import { Page, List, Button, Text, Icon } from 'zmp-ui';
 import { useNavigate } from 'zmp-ui';
 import dayjs from 'dayjs';
 
-// Import showToast and getUserInfo
-import { showToast, getUserInfo } from 'zmp-sdk/apis';
+import { showToast, getUserInfo, Payment } from 'zmp-sdk/apis';
 
-// Import Jotai to update global cart
 import { useAtom } from 'jotai';
-import { selectedSlotsAtom } from '../store/cart'; // Adjust path if needed
+import { selectedSlotsAtom } from '../store/cart';
 
 interface Slot {
   id: number;
@@ -21,7 +19,6 @@ interface Slot {
 const SummaryPage: React.FC = () => {
   const navigate = useNavigate();
   
-  // Use global atom for real-time cart
   const [selectedSlots, setSelectedSlots] = useAtom(selectedSlotsAtom);
 
   if (selectedSlots.length === 0) {
@@ -37,7 +34,6 @@ const SummaryPage: React.FC = () => {
     );
   }
 
-  // Group slots by date
   const groupedByDate = selectedSlots.reduce((acc, slot) => {
     if (!acc[slot.date]) acc[slot.date] = [];
     acc[slot.date].push(slot);
@@ -47,7 +43,6 @@ const SummaryPage: React.FC = () => {
   const totalSlots = selectedSlots.length;
   const totalPrice = selectedSlots.reduce((sum, slot) => sum + slot.price, 0);
 
-  // Function to remove slot
   const removeSlot = (removedSlot: Slot) => {
     const updatedSlots = selectedSlots.filter(s => !(s.id === removedSlot.id && s.date === removedSlot.date));
     setSelectedSlots(updatedSlots);
@@ -58,47 +53,68 @@ const SummaryPage: React.FC = () => {
     }
   };
 
-  // Payment handler: Get user info, create order on backend, redirect to VNPay URL
   const handlePayment = async () => {
     try {
-      // Get user info from Zalo
-      const userResponse = await getUserInfo({});
-      console.log('User info from Zalo:', userResponse); // Debug
 
-      // Lấy userId từ userInfo.id (theo log của bạn)
-      const userInfo = userResponse.userInfo || {};
-      const userId = userInfo.id; // Dùng 'id' thay vì 'userId'
-      const phone = ''; // Phone không có sẵn trong UserInfo
-      const name = userInfo.name || 'Unknown';
+      const userId = '3368637342326461234'; // Hardcode tạm (lấy từ log trước)
+      const phone = '0901234567';
+      const name = 'User Name';
 
       if (!userId) {
-        throw new Error('Không lấy được userId từ Zalo. Vui lòng đăng nhập lại.');
+        showToast({ message: 'Vui lòng đăng nhập Zalo!' });
+        return;
       }
 
-      const payload = {
-        userId,
-        phone,
-        name,
-        selectedSlots,
-        guestUserIds: []
-      };
-      console.log('Sending payload to backend:', payload);
+      const orderId = globalThis.crypto.randomUUID(); // Sinh orderId
 
+      // Gọi backend để sinh mac
       const response = await fetch('https://pes-pickleball-backend.vercel.app/api/create-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({
+          userId,
+          phone,
+          name,
+          selectedSlots,
+          amount: totalPrice,
+          desc: 'Đặt sân Pickleball',
+          orderId
+        })
       });
 
       const data = await response.json();
-      console.log('Backend response:', data);
+      if (!data.success) throw new Error(data.error || 'Create order failed');
 
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || 'Create order failed');
-      }
+      const { mac } = data;
 
-      const paymentUrl = data.paymentUrl;
-      window.location.href = paymentUrl; // Redirect to VNPay
+      // Gọi SDK Comprehensive (createOrder)
+      Payment.createOrder({
+        desc: 'Đặt sân Pickleball',
+        item: selectedSlots.map(slot => ({
+          id: slot.id.toString(),
+          amount: slot.price
+        })),
+        amount: totalPrice,
+        extradata: JSON.stringify({
+          userId,
+          phone,
+          name,
+          notes: 'Extra data'
+        }),
+        method: JSON.stringify({
+          id: "VNPAY_SANDBOX",
+          isCustom: false
+        }),
+        mac,
+        success: (res) => {
+          showToast({ message: 'Tạo đơn hàng thành công! Đang chuyển thanh toán...' });
+          setSelectedSlots([]); // Reset giỏ
+          navigate('/success');
+        },
+        fail: (err) => {
+          showToast({ message: 'Tạo đơn hàng thất bại!' });
+        }
+      });
     } catch (err) {
       console.error('Payment error:', err);
       showToast({ message: 'Lỗi thanh toán, thử lại!' });
@@ -113,7 +129,7 @@ const SummaryPage: React.FC = () => {
           Xác nhận đặt sân Pickleball
         </Text.Title>
 
-        {/* Venue info */}
+        {/* Thông tin sân */}
         <div className="bg-white rounded-xl shadow-md p-4 mb-6">
           <div className="flex items-center mb-3">
             <Icon icon="zi-location-solid" className="text-blue-600 mr-3 text-2xl" />
@@ -127,7 +143,7 @@ const SummaryPage: React.FC = () => {
           </Text>
         </div>
 
-        {/* Slot list with remove button */}
+        {/* Danh sách slot */}
         <Text.Title className="font-bold text-lg mb-3 text-gray-800">
           Các khung giờ đã chọn ({totalSlots} slot) – Bỏ nếu không cần
         </Text.Title>
@@ -164,7 +180,7 @@ const SummaryPage: React.FC = () => {
             </div>
           ))}
 
-        {/* Total */}
+        {/* Tổng kết */}
         <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl shadow-md p-6 mb-8">
           <div className="flex justify-between items-center">
             <div>
@@ -177,13 +193,13 @@ const SummaryPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Note */}
+        {/* Lưu ý */}
         <Text className="text-sm text-gray-500 text-center mb-6">
           Vui lòng kiểm tra kỹ thông tin trước khi thanh toán. Hệ thống sẽ gửi mã xác nhận qua tin nhắn sau khi thanh toán thành công.
         </Text>
       </div>
 
-      {/* Fixed bottom buttons */}
+      {/* Nút fixed bottom */}
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg p-4 flex gap-4 z-10">
         <Button
           variant="secondary"

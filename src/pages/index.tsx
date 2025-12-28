@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { Page, Calendar, List, Button, Text, Checkbox, Spinner, useNavigate } from 'zmp-ui';
 import dayjs, { Dayjs } from 'dayjs';
 import { showToast } from 'zmp-sdk/apis';
@@ -34,10 +34,8 @@ const HomePage = () => {
   const [slotsCache, setSlotsCache] = useState<{ [date: string]: Slot[] }>({});
   const [currentMonth, setCurrentMonth] = useState<Dayjs>(dayjs());
 
-  // Load slot cho ngày mặc định khi app mount
-  useEffect(() => {
-    onSelect(selectedDate.toDate()); // Load lần đầu
-  }, []); // Chạy 1 lần
+  // Bỏ useEffect load slot ban đầu → app mở không load slot nào
+  // Slot chỉ load khi user click chọn ngày
 
   const onSelect = useCallback(
     _debounce((date: Date) => {
@@ -70,12 +68,28 @@ const HomePage = () => {
           setError('Lỗi tải slots giờ');
           setLoading(false);
         });
-    }, 500), // Tăng debounce để giảm load lặp
+    }, 500),
     [slotsCache]
   );
 
+  // Hàm kiểm tra tháng có ngày nào chọn được không (trong phạm vi today to +90 days)
+  const isMonthSelectable = (month: Dayjs) => {
+    const today = dayjs();
+    const endDate = today.add(90, 'day');
+    const startOfMonth = month.startOf('month');
+    const endOfMonth = month.endOf('month');
+
+    // Tháng có selectable nếu có ít nhất 1 ngày trong phạm vi
+    return startOfMonth.isBefore(endDate) && endOfMonth.isAfter(today);
+  };
+
   const handlePanelChange = (date: Date) => {
     const newMonth = dayjs(date);
+    if (!isMonthSelectable(newMonth)) {
+      showToast({ message: 'Không có slot ngoài phạm vi!' });
+      return; // Không chuyển tháng nếu tháng không selectable
+    }
+
     setCurrentMonth(newMonth);
 
     let targetDate = newMonth.startOf('month');
@@ -89,8 +103,7 @@ const HomePage = () => {
 
     if (!targetDate.isSame(selectedDate, 'day')) {
       setSelectedDate(targetDate);
-      // Bỏ gọi onSelect ở đây để tránh load lặp khi đổi tháng
-      // User sẽ chọn ngày cụ thể để load slot
+      // Bỏ gọi onSelect để tránh tự động load slot khi chuyển tháng
     }
   };
 
