@@ -76,7 +76,7 @@ const SummaryPage: React.FC = () => {
           phone,
           name,
           selectedSlots,
-          amount: totalPrice,
+          amount: totalPrice.toString(),
           desc: 'Đặt sân Pickleball',
           orderId
         })
@@ -94,12 +94,12 @@ const SummaryPage: React.FC = () => {
           id: slot.id.toString(),
           amount: slot.price
         })),
-        amount: totalPrice,
+        amount: totalPrice.toString(),
         extradata: JSON.stringify({
           userId,
           phone,
           name,
-          notes: 'Extra data'
+          notes: 'Extra data from booking'
         }),
         method: JSON.stringify({
           id: "VNPAY_SANDBOX",
@@ -108,10 +108,15 @@ const SummaryPage: React.FC = () => {
         mac,
         success: (res) => {
           showToast({ message: 'Tạo đơn hàng thành công! Đang chuyển thanh toán...' });
+          console.log('SDK createOrder success:', res); // Debug
           setSelectedSlots([]); // Reset giỏ
-          navigate('/success');
+          // navigate('/success');
         },
         fail: (err) => {
+          console.log('mac:', mac); // Debug để kiểm tra chuỗi
+
+          console.log('SDK createOrder fail:', err); // Debug
+
           showToast({ message: 'Tạo đơn hàng thất bại!' });
         }
       });
