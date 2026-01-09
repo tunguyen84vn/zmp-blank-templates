@@ -3,7 +3,7 @@ import { Page, List, Button, Text, Icon } from 'zmp-ui';
 import { useNavigate } from 'zmp-ui';
 import dayjs from 'dayjs';
 
-import { showToast, getUserInfo, Payment } from 'zmp-sdk/apis';
+import { showToast, Payment } from 'zmp-sdk/apis';
 
 import { useAtom } from 'jotai';
 import { selectedSlotsAtom } from '../store/cart';
@@ -55,7 +55,6 @@ const SummaryPage: React.FC = () => {
 
   const handlePayment = async () => {
     try {
-
       const userId = '3368637342326461234'; // Hardcode tạm (lấy từ log trước)
       const phone = '0901234567';
       const name = 'User Name';
@@ -66,6 +65,7 @@ const SummaryPage: React.FC = () => {
       }
 
       const orderId = globalThis.crypto.randomUUID(); // Sinh orderId
+      console.log('orderId saved to DB:', orderId);
 
       // Gọi backend để sinh mac
       const response = await fetch('https://pes-pickleball-backend.vercel.app/api/create-order', {
@@ -106,20 +106,76 @@ const SummaryPage: React.FC = () => {
           isCustom: false
         }),
         mac,
+        
         success: (res) => {
           showToast({ message: 'Tạo đơn hàng thành công! Đang chuyển thanh toán...' });
-          console.log('SDK createOrder success:', res); // Debug
-          setSelectedSlots([]); // Reset giỏ
-          // navigate('/success');
+          console.log('SDK createOrder success:', res);
+          
+          console.log('orderId:', res.orderId);
+          // Bắt đầu kiểm tra trạng thái giao dịch
+          checkTransactionStatus();
+
+          // Reset giỏ hàng ngay khi createOrder thành công
+          setSelectedSlots([]);
+
+          
         },
         fail: (err) => {
-          console.log('mac:', mac); // Debug để kiểm tra chuỗi
-
-          console.log('SDK createOrder fail:', err); // Debug
-
+          console.log('mac:', mac); // Debug
+          console.log('SDK createOrder fail:', err);
           showToast({ message: 'Tạo đơn hàng thất bại!' });
+
+          // Vẫn thử check (trường hợp payment done nhưng SDK fail)
+          checkTransactionStatus();
         }
       });
+
+      // === Hàm helper kiểm tra trạng thái (đã cập nhật fallback retry) ===
+      const checkTransactionStatus = () => {
+        const queryParams = new URLSearchParams(window.location.search);
+        const paramsObj: Record<string, string> = {};
+        queryParams.forEach((value, key) => {
+          paramsObj[key] = value;
+        });
+
+        console.log('Query params sau redirect từ Zalo:', paramsObj);
+
+        // Nếu không có params, thử gọi checkTransaction với data rỗng (fallback) và retry sau 3s
+        const checkData = Object.keys(paramsObj).length > 0 ? paramsObj : {};
+
+        if (Object.keys(checkData).length === 0) {
+          console.log('Không có query params → thử check fallback và retry sau 3 giây...');
+          setTimeout(checkTransactionStatus, 3000); // retry tự động
+        }
+
+        Payment.checkTransaction({
+          data: checkData,
+          success: (rs) => {
+            console.log('Kết quả checkTransaction:', rs);
+
+            if (rs.resultCode === 1) {
+              showToast({
+                message: `Thanh toán thành công! Mã giao dịch: ${rs.transId || 'N/A'}`
+              });
+              // Optional: navigate('/success');
+            } else if (rs.resultCode === 0) {
+              showToast({
+                message: 'Giao dịch đang xử lý, vui lòng chờ thêm...'
+              });
+              // Retry sau 5 giây nếu pending
+              setTimeout(checkTransactionStatus, 5000);
+            } else {
+              showToast({
+                message: `Thanh toán thất bại: ${rs.msg || 'Lỗi không xác định'}`
+              });
+            }
+          },
+          fail: (err) => {
+            console.error('checkTransaction fail:', err);
+            showToast({ message: 'Không thể kiểm tra trạng thái giao dịch' });
+          }
+        });
+      };
     } catch (err) {
       console.error('Payment error:', err);
       showToast({ message: 'Lỗi thanh toán, thử lại!' });
