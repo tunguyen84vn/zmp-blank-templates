@@ -65,7 +65,6 @@ const SummaryPage: React.FC = () => {
       }
 
       const orderId = globalThis.crypto.randomUUID(); // Sinh orderId
-      console.log('orderId saved to DB:', orderId);
 
       // Gọi backend để sinh mac
       const response = await fetch('https://pes-pickleball-backend.vercel.app/api/create-order', {
@@ -106,19 +105,15 @@ const SummaryPage: React.FC = () => {
           isCustom: false
         }),
         mac,
-        
         success: (res) => {
           showToast({ message: 'Tạo đơn hàng thành công! Đang chuyển thanh toán...' });
           console.log('SDK createOrder success:', res);
-          
-          console.log('orderId:', res.orderId);
-          // Bắt đầu kiểm tra trạng thái giao dịch
-          checkTransactionStatus();
 
           // Reset giỏ hàng ngay khi createOrder thành công
           setSelectedSlots([]);
 
-          
+          // Bắt đầu kiểm tra trạng thái giao dịch
+          checkTransactionStatus();
         },
         fail: (err) => {
           console.log('mac:', mac); // Debug
@@ -130,44 +125,29 @@ const SummaryPage: React.FC = () => {
         }
       });
 
-      // === Hàm helper kiểm tra trạng thái (đã cập nhật fallback retry) ===
+      // === Hàm helper kiểm tra trạng thái ===
       const checkTransactionStatus = () => {
+        // Lấy query params từ URL hiện tại (sau redirect từ Zalo)
         const queryParams = new URLSearchParams(window.location.search);
         const paramsObj: Record<string, string> = {};
         queryParams.forEach((value, key) => {
           paramsObj[key] = value;
         });
 
-        console.log('Query params sau redirect từ Zalo:', paramsObj);
-
-        // Nếu không có params, thử gọi checkTransaction với data rỗng (fallback) và retry sau 3s
-        const checkData = Object.keys(paramsObj).length > 0 ? paramsObj : {};
-
-        if (Object.keys(checkData).length === 0) {
-          console.log('Không có query params → thử check fallback và retry sau 3 giây...');
-          setTimeout(checkTransactionStatus, 3000); // retry tự động
-        }
+        console.log('Query params sau redirect:', paramsObj);
 
         Payment.checkTransaction({
-          data: checkData,
+          data: paramsObj, // Truyền object từ query params
           success: (rs) => {
-            console.log('Kết quả checkTransaction:', rs);
-
+            console.log('checkTransaction success:', rs);
             if (rs.resultCode === 1) {
-              showToast({
-                message: `Thanh toán thành công! Mã giao dịch: ${rs.transId || 'N/A'}`
-              });
-              // Optional: navigate('/success');
+              showToast({ message: `Thanh toán thành công! Mã giao dịch: ${rs.transId || 'N/A'}` });
+              // navigate('/success');
             } else if (rs.resultCode === 0) {
-              showToast({
-                message: 'Giao dịch đang xử lý, vui lòng chờ thêm...'
-              });
-              // Retry sau 5 giây nếu pending
+              showToast({ message: 'Giao dịch đang xử lý, vui lòng chờ 10-30 giây...' });
               setTimeout(checkTransactionStatus, 5000);
             } else {
-              showToast({
-                message: `Thanh toán thất bại: ${rs.msg || 'Lỗi không xác định'}`
-              });
+              showToast({ message: `Thanh toán thất bại: ${rs.msg || 'Lỗi không xác định'}` });
             }
           },
           fail: (err) => {
@@ -226,7 +206,7 @@ const SummaryPage: React.FC = () => {
                           {slot.price.toLocaleString('vi-VN')}đ
                         </Text>
                         <Button
-                          variant="tertiary"
+                          variant="secondary"
                           size="small"
                           icon={<Icon icon="zi-close" />}
                           onClick={() => removeSlot(slot)}
