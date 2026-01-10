@@ -84,7 +84,7 @@ const SummaryPage: React.FC = () => {
       const data = await response.json();
       if (!data.success) throw new Error(data.error || 'Create order failed');
 
-      const { mac } = data;
+      const { mac, orderId: merchantOrderId } = data;  // Lưu merchantOrderId từ backend
 
       // Gọi SDK Comprehensive (createOrder)
       Payment.createOrder({
@@ -109,10 +109,49 @@ const SummaryPage: React.FC = () => {
           showToast({ message: 'Tạo đơn hàng thành công! Đang chuyển thanh toán...' });
           console.log('SDK createOrder success:', res);
 
+          // THÊM: Update zaloOrderId vào DB
+          const zaloOrderId = res.orderId;  // Từ docs, res có orderId
+          fetch('https://pes-pickleball-backend.vercel.app/api/update-zalo-orderid', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ bookingId: merchantOrderId, zaloOrderId })
+          }).then(updateRes => updateRes.json())
+            .then(updateData => {
+              if (updateData.success) console.log('Updated zaloOrderId successfully');
+              else console.error('Update zaloOrderId failed');
+            })
+            .catch(updateErr => console.error('Update zaloOrderId error:', updateErr));
+
           // Reset giỏ hàng ngay khi createOrder thành công
           setSelectedSlots([]);
 
-          // Bắt đầu kiểm tra trạng thái giao dịch
+          // THÊM: Lắng nghe PaymentDone event
+          window.addEventListener('PaymentDone', (event: Event) => {
+            const paymentData = (event as CustomEvent).detail; // Data từ event: { orderId, transId, resultCode, msg }
+            console.log('PaymentDone event:', paymentData);
+
+            Payment.checkTransaction({
+              data: paymentData, // Dùng data từ event thay vì query params
+              success: (rs) => {
+                console.log('checkTransaction success:', rs);
+                if (rs.resultCode === 1) {
+                  showToast({ message: `Thanh toán thành công! Mã giao dịch: ${rs.transId || 'N/A'}` });
+                  navigate('/success');
+                } else if (rs.resultCode === 0) {
+                  showToast({ message: 'Giao dịch đang xử lý, vui lòng chờ...' });
+                  setTimeout(() => Payment.checkTransaction({ data: paymentData }), 5000); // Retry với data event
+                } else {
+                  showToast({ message: `Thanh toán thất bại: ${rs.msg || 'Lỗi không xác định'}` });
+                }
+              },
+              fail: (err) => {
+                console.error('checkTransaction fail:', err);
+                showToast({ message: 'Không thể kiểm tra trạng thái giao dịch' });
+              }
+            });
+          });
+
+          // Bắt đầu kiểm tra trạng thái giao dịch (giữ nguyên nhưng ưu tiên event)
           checkTransactionStatus();
         },
         fail: (err) => {
@@ -136,13 +175,18 @@ const SummaryPage: React.FC = () => {
 
         console.log('Query params sau redirect:', paramsObj);
 
+        if (Object.keys(paramsObj).length === 0) {
+          showToast({ message: 'Không có tham số trả về, đang chờ sự kiện thanh toán...' });
+          return; // Bỏ retry nếu rỗng
+        }
+
         Payment.checkTransaction({
           data: paramsObj, // Truyền object từ query params
           success: (rs) => {
             console.log('checkTransaction success:', rs);
             if (rs.resultCode === 1) {
               showToast({ message: `Thanh toán thành công! Mã giao dịch: ${rs.transId || 'N/A'}` });
-              // navigate('/success');
+              navigate('/success');
             } else if (rs.resultCode === 0) {
               showToast({ message: 'Giao dịch đang xử lý, vui lòng chờ 10-30 giây...' });
               setTimeout(checkTransactionStatus, 5000);
