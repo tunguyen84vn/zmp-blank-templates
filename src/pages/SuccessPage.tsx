@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Page, Text, Button, List, Icon } from 'zmp-ui';
 import { useNavigate, useLocation } from 'zmp-ui';
 import dayjs from 'dayjs';
@@ -9,37 +9,97 @@ interface Slot {
   price: number;
 }
 
-const SELECTED_SLOTS_KEY = 'pes_selected_slots_temp';
+const SUCCESS_DATA_KEY = 'pes_success_data';
 
 const SuccessPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const [isLoading, setIsLoading] = useState(true);
+  const [data, setData] = useState({ transId: 'N/A', totalPrice: 0, selectedSlots: [] });
 
-  let { transId = 'N/A', totalPrice = 0, selectedSlots = [] } = location.state || {};
+  useEffect(() => {
+    let fetchedData = location.state || {};
 
-  // Nếu state không có selectedSlots (có thể bị mất do navigation), đọc từ localStorage
-  if (selectedSlots.length === 0) {
-    const stored = localStorage.getItem(SELECTED_SLOTS_KEY);
-    if (stored) {
-      try {
-        selectedSlots = JSON.parse(stored);
-        totalPrice = selectedSlots.reduce((sum: number, slot: Slot) => sum + slot.price, 0);
-        // Xóa sau khi sử dụng để tránh lưu dư
-        localStorage.removeItem(SELECTED_SLOTS_KEY);
-      } catch (e) {
-        console.error('Lỗi parse selectedSlots từ localStorage:', e);
+    // Bước 1: Đọc từ state
+    if (!fetchedData.selectedSlots || fetchedData.selectedSlots.length === 0) {
+      // Bước 2: Đọc từ localStorage nếu state rỗng
+      const stored = localStorage.getItem(SUCCESS_DATA_KEY);
+      if (stored) {
+        try {
+          fetchedData = JSON.parse(stored);
+          // Delay xóa 1 phút phòng reload
+          setTimeout(() => localStorage.removeItem(SUCCESS_DATA_KEY), 60000);
+        } catch (e) {
+          console.error('Lỗi parse success data từ localStorage:', e);
+        }
       }
     }
-  }
+
+    // Bước 3: Nếu vẫn rỗng, fallback fetch từ backend nếu có transId
+    if (!fetchedData.selectedSlots || fetchedData.selectedSlots.length === 0) {
+      const transId = fetchedData.transId || location.state?.transId || 'N/A';
+      if (transId !== 'N/A') {
+        fetchBookingFromBackend(transId);
+        return; // Đợi fetch xong rồi set loading false
+      }
+    }
+
+    // Nếu có data từ client, update state và tắt loading
+    setData(fetchedData);
+    setIsLoading(false);
+
+    // Debug log
+    console.log('SuccessPage loaded:', {
+      fromState: location.state ? 'Có state' : 'Không có state',
+      fromStorage: localStorage.getItem(SUCCESS_DATA_KEY) ? 'Có data storage' : 'Không có storage',
+      selectedSlotsLength: fetchedData.selectedSlots?.length || 0,
+      selectedSlotsSample: fetchedData.selectedSlots?.slice(0, 3) || [],
+      totalPrice: fetchedData.totalPrice || 0,
+    });
+  }, [location.state]);
+
+  const fetchBookingFromBackend = async (transId: string) => {
+    try {
+      const response = await fetch(`https://pes-pickleball-backend.vercel.app/api/get-booking?transId=${transId}`);
+      const bookingData = await response.json();
+      if (bookingData.success) {
+        setData({
+          transId,
+          totalPrice: bookingData.totalPrice,
+          selectedSlots: bookingData.selectedSlots,
+        });
+        console.log('Fetch từ backend thành công:', bookingData);
+      } else {
+        console.warn('Không tìm thấy chi tiết từ server, vui lòng kiểm tra lại.');
+      }
+    } catch (err) {
+      console.error('Lỗi fetch booking từ backend:', err);
+      console.error('Lỗi kết nối server, vui lòng kiểm tra lại sau.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const transId = data.transId || 'N/A';
+  const totalPrice = data.totalPrice || 0;
+  const selectedSlots = data.selectedSlots || [];
 
   const totalSlots = selectedSlots.length;
 
-  // Group by date
   const groupedByDate = selectedSlots.reduce((acc: Record<string, Slot[]>, slot: any) => {
     if (!acc[slot.date]) acc[slot.date] = [];
     acc[slot.date].push(slot);
     return acc;
   }, {});
+
+  if (isLoading) {
+    return (
+      <Page className="flex flex-col items-center justify-center h-full bg-green-50">
+        <Icon icon="zi-check" className="text-blue-600 text-6xl animate-spin mb-4" />
+        <Text className="text-lg text-gray-600">Đang tải chi tiết đặt sân...</Text>
+      </Page>
+    );
+  }
 
   return (
     <Page className="bg-green-50 min-h-screen p-6">

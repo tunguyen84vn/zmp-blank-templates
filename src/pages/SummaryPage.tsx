@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Page, List, Button, Text, Icon } from 'zmp-ui';
 import { useNavigate } from 'zmp-ui';
 import dayjs from 'dayjs';
@@ -16,14 +16,50 @@ interface Slot {
   date: string;
 }
 
-const SELECTED_SLOTS_KEY = 'pes_selected_slots_temp';
+const SUCCESS_DATA_KEY = 'pes_success_data';
+const SUCCESS_LOCK_KEY = 'pes_success_locked';
+const FINAL_SLOTS_KEY = 'pes_final_slots';
 
 const SummaryPage: React.FC = () => {
   const navigate = useNavigate();
   
   const [selectedSlots, setSelectedSlots] = useAtom(selectedSlotsAtom);
 
+  // Ref để lấy selectedSlots mới nhất (tránh closure cũ trong useEffect)
+  const latestSelectedSlots = useRef(selectedSlots);
+
+  // Cập nhật ref mỗi khi selectedSlots thay đổi
+  useEffect(() => {
+    latestSelectedSlots.current = selectedSlots;
+  }, [selectedSlots]);
+
   const REDIRECT_PATH = '/payment-result';
+
+  // Hàm lưu success data chỉ 1 lần
+  const saveSuccessDataOnce = (successData: any) => {
+    if (localStorage.getItem(SUCCESS_LOCK_KEY)) {
+      console.log('Success data đã bị lock, bỏ qua overwrite');
+      return;
+    }
+    localStorage.setItem(SUCCESS_DATA_KEY, JSON.stringify(successData));
+    localStorage.setItem(SUCCESS_LOCK_KEY, 'true');
+    console.log('Lưu successData lần đầu thành công:', successData);
+    
+    // Tự động xóa sau 10 phút
+    setTimeout(() => {
+      localStorage.removeItem(SUCCESS_LOCK_KEY);
+      localStorage.removeItem(SUCCESS_DATA_KEY);
+      localStorage.removeItem(FINAL_SLOTS_KEY);
+    }, 600000);
+  };
+
+  // Hàm xóa tất cả key temp khi fail/hủy
+  const clearTempKeys = () => {
+    localStorage.removeItem(SUCCESS_LOCK_KEY);
+    localStorage.removeItem(SUCCESS_DATA_KEY);
+    localStorage.removeItem(FINAL_SLOTS_KEY);
+    console.log('Đã xóa temp keys do fail/hủy thanh toán');
+  };
 
   useEffect(() => {
     const handleOpenApp = (data: any) => {
@@ -40,24 +76,33 @@ const SummaryPage: React.FC = () => {
 
             if (rs.resultCode === 1 || rs.msg?.toLowerCase().includes('thành công')) {
               showToast({ message: `Thanh toán thành công! Mã giao dịch: ${rs.transId || rs.orderId || 'N/A'}` });
-              navigate('/success', {
-                state: {
-                  transId: rs.transId || rs.orderId || 'N/A',
-                  totalPrice: selectedSlots.reduce((sum, slot) => sum + slot.price, 0),
-                  selectedSlots: [...selectedSlots],
-                }
-              });
+              
+              const storedFinal = localStorage.getItem(FINAL_SLOTS_KEY);
+              const finalSlots = storedFinal ? JSON.parse(storedFinal) : latestSelectedSlots.current;
+              
+              const successData = {
+                transId: rs.transId || rs.orderId || 'N/A',
+                totalPrice: finalSlots.reduce((sum, slot) => sum + slot.price, 0),
+                selectedSlots: [...finalSlots],
+              };
+              
+              saveSuccessDataOnce(successData);
+              
+              navigate('/success', { state: successData });
               setSelectedSlots([]);
+              localStorage.removeItem(FINAL_SLOTS_KEY);
             } else if (rs.resultCode === 0) {
               showToast({ message: 'Giao dịch đang xử lý, vui lòng chờ...' });
-              setTimeout(() => Payment.checkTransaction({ data: path }), 5000);
+              setTimeout(() => Payment.checkTransaction({ data: path }), 8000);
             } else {
               showToast({ message: `Thanh toán thất bại: ${rs.msg || 'Lỗi không xác định'}` });
+              clearTempKeys();
             }
           },
           fail: (err) => {
             console.error('checkTransaction fail from OpenApp:', err);
             showToast({ message: 'Không thể kiểm tra trạng thái giao dịch' });
+            clearTempKeys();
           }
         });
       }
@@ -69,20 +114,24 @@ const SummaryPage: React.FC = () => {
 
       if (resultCode === 1) {
         showToast({ message: 'Thanh toán thành công (từ PaymentClose)' });
-        navigate('/success', {
-          state: {
-            transId: 'N/A (từ PaymentClose)',
-            totalPrice: selectedSlots.reduce((sum, slot) => sum + slot.price, 0),
-            selectedSlots: [...selectedSlots],
-          }
-        });
+        
+        const storedFinal = localStorage.getItem(FINAL_SLOTS_KEY);
+        const finalSlots = storedFinal ? JSON.parse(storedFinal) : latestSelectedSlots.current;
+        
+        const successData = {
+          transId: 'N/A (từ PaymentClose)',
+          totalPrice: finalSlots.reduce((sum, slot) => sum + slot.price, 0),
+          selectedSlots: [...finalSlots],
+        };
+        
+        saveSuccessDataOnce(successData);
+        
+        navigate('/success', { state: successData });
         setSelectedSlots([]);
-      } else if (resultCode === 0) {
-        showToast({ message: 'Giao dịch đang xử lý (từ PaymentClose)' });
-      } else if (resultCode === -1) {
-        showToast({ message: 'Thanh toán thất bại (từ PaymentClose)' });
+        localStorage.removeItem(FINAL_SLOTS_KEY);
       } else {
-        showToast({ message: 'Người dùng thoát thanh toán mà không hoàn tất' });
+        showToast({ message: resultCode === 0 ? 'Giao dịch đang xử lý' : 'Thanh toán bị hủy hoặc thất bại' });
+        clearTempKeys(); // Quan trọng: xóa key khi hủy
       }
     };
 
@@ -93,7 +142,7 @@ const SummaryPage: React.FC = () => {
       events.off(EventName.OpenApp, handleOpenApp);
       events.off(EventName.PaymentClose, handlePaymentClose);
     };
-  }, [navigate, selectedSlots]);
+  }, [navigate]);
 
   if (selectedSlots.length === 0) {
     return (
@@ -127,9 +176,17 @@ const SummaryPage: React.FC = () => {
     }
   };
 
+  const clearCart = () => {
+    if (window.confirm('Bạn có chắc chắn muốn xóa TOÀN BỘ giỏ hàng?\nHành động này không thể hoàn tác.')) {
+      setSelectedSlots([]);
+      showToast({ message: 'Đã xóa toàn bộ giỏ hàng' });
+      navigate(-1);
+    }
+  };
+
   const handlePayment = async () => {
     try {
-      const userId = '3368637342326461234'; // Hardcode tạm (nên thay bằng thực tế từ user profile)
+      const userId = '3368637342326461234'; // Hardcode tạm
       const phone = '0901234567';
       const name = 'User Name';
 
@@ -138,8 +195,9 @@ const SummaryPage: React.FC = () => {
         return;
       }
 
-      // LƯU TEMP selectedSlots vào localStorage trước khi bắt đầu thanh toán
-      localStorage.setItem(SELECTED_SLOTS_KEY, JSON.stringify(selectedSlots));
+      // Xóa key cũ trước khi lưu mới (đảm bảo giỏ hàng hiện tại là final)
+      localStorage.removeItem(FINAL_SLOTS_KEY);
+      localStorage.setItem(FINAL_SLOTS_KEY, JSON.stringify(selectedSlots));
 
       const orderId = globalThis.crypto.randomUUID();
 
@@ -196,10 +254,13 @@ const SummaryPage: React.FC = () => {
         fail: (err) => {
           console.log('SDK createOrder fail:', err);
           showToast({ message: 'Tạo đơn hàng thất bại!' });
-          localStorage.removeItem(SELECTED_SLOTS_KEY); // Xóa temp nếu fail
+          clearTempKeys();
           checkTransactionStatus();
         }
       });
+
+      let retryCount = 0;
+      const MAX_RETRY = 5;
 
       const checkTransactionStatus = () => {
         const queryParams = new URLSearchParams(window.location.search);
@@ -219,33 +280,46 @@ const SummaryPage: React.FC = () => {
             console.log('checkTransaction success:', rs);
             if (rs.resultCode === 1) {
               showToast({ message: `Thanh toán thành công! Mã giao dịch: ${rs.transId || 'N/A'}` });
-              navigate('/success', {
-                state: {
-                  transId: rs.transId || 'N/A',
-                  totalPrice: selectedSlots.reduce((sum, slot) => sum + slot.price, 0),
-                  selectedSlots: [...selectedSlots],
-                }
-              });
+              
+              const storedFinal = localStorage.getItem(FINAL_SLOTS_KEY);
+              const finalSlots = storedFinal ? JSON.parse(storedFinal) : latestSelectedSlots.current;
+              
+              const successData = {
+                transId: rs.transId || 'N/A',
+                totalPrice: finalSlots.reduce((sum, slot) => sum + slot.price, 0),
+                selectedSlots: [...finalSlots],
+              };
+              
+              saveSuccessDataOnce(successData);
+              
+              navigate('/success', { state: successData });
               setSelectedSlots([]);
+              localStorage.removeItem(FINAL_SLOTS_KEY);
             } else if (rs.resultCode === 0) {
-              showToast({ message: 'Giao dịch đang xử lý, vui lòng chờ 10-30 giây...' });
-              setTimeout(checkTransactionStatus, 5000);
+              if (retryCount < MAX_RETRY) {
+                retryCount++;
+                showToast({ message: `Giao dịch đang xử lý (${retryCount}/${MAX_RETRY}), vui lòng chờ...` });
+                setTimeout(checkTransactionStatus, 8000); // 8 giây
+              } else {
+                showToast({ message: 'Giao dịch xử lý lâu, vui lòng kiểm tra lại sau.' });
+                clearTempKeys();
+              }
             } else {
               showToast({ message: `Thanh toán thất bại: ${rs.msg || 'Lỗi không xác định'}` });
-              localStorage.removeItem(SELECTED_SLOTS_KEY); // Xóa nếu fail
+              clearTempKeys();
             }
           },
           fail: (err) => {
             console.error('checkTransaction fail:', err);
             showToast({ message: 'Không thể kiểm tra trạng thái giao dịch' });
-            localStorage.removeItem(SELECTED_SLOTS_KEY);
+            clearTempKeys();
           }
         });
       };
     } catch (err) {
       console.error('Payment error:', err);
       showToast({ message: 'Lỗi thanh toán, thử lại!' });
-      localStorage.removeItem(SELECTED_SLOTS_KEY);
+      clearTempKeys();
     }
   };
 
@@ -269,9 +343,19 @@ const SummaryPage: React.FC = () => {
           </Text>
         </div>
 
-        <Text.Title className="font-bold text-lg mb-3 text-gray-800">
-          Các khung giờ đã chọn ({totalSlots} slot) – Bỏ nếu không cần
-        </Text.Title>
+        <div className="flex justify-between items-center mb-4">
+          <Text.Title className="font-bold text-lg text-gray-800">
+            Các khung giờ đã chọn ({totalSlots} slot)
+          </Text.Title>
+          <Button
+            color="red"
+            variant="secondary"
+            size="small"
+            onClick={clearCart}
+          >
+            Xóa giỏ hàng
+          </Button>
+        </div>
 
         {Object.entries(groupedByDate)
           .sort(([dateA], [dateB]) => dayjs(dateA).diff(dayjs(dateB)))
