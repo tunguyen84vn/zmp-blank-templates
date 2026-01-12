@@ -28,6 +28,7 @@ import Summary from './pages/SummaryPage';   // Trang tóm tắt
 // Expose app configuration
 import appConfig from "../app-config.json";
 import SuccessPage from "./pages/SuccessPage";
+import MyBookings from "./pages/MyBookings";
 
 if (!window.APP_CONFIG) {
   window.APP_CONFIG = appConfig as any;
@@ -41,6 +42,7 @@ const Layout = () => (
         <Route path="/" Component={Home} />
         <Route path="/summary" Component={Summary} />
         <Route path="/success" Component={SuccessPage} />
+        <Route path="/my-bookings" Component={MyBookings} />
       </Routes>
     </ZMPRouter>
   </Provider>
