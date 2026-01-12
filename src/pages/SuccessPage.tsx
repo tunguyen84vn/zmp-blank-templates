@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Page, Text, Button } from 'zmp-ui';
 import { useNavigate, useLocation } from 'zmp-ui';
+import dayjs from 'dayjs';
 
 const SuccessPage: React.FC = () => {
   const navigate = useNavigate();
@@ -8,21 +9,23 @@ const SuccessPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [bookingId, setBookingId] = useState('N/A');
   const [totalPrice, setTotalPrice] = useState(0);
+  const [selectedSlots, setSelectedSlots] = useState<any[]>([]);
 
   useEffect(() => {
     const stateData = location.state || {};
 
-    // Lấy bookingId từ state (từ payment result hoặc redirect)
     if (stateData.bookingId) {
       setBookingId(stateData.bookingId);
     } else if (stateData.transId) {
-      // Nếu chỉ có transId, có thể dùng làm fallback (tùy theo bạn truyền)
       setBookingId(stateData.transId);
     }
 
-    // Lấy tổng tiền nếu có
     if (stateData.totalPrice) {
       setTotalPrice(stateData.totalPrice);
+    }
+
+    if (stateData.selectedSlots) {
+      setSelectedSlots(stateData.selectedSlots);
     }
 
     setIsLoading(false);
@@ -42,21 +45,34 @@ const SuccessPage: React.FC = () => {
           Cảm ơn bạn đã tin tưởng PES Pickleball. Chúng tôi đã gửi mã xác nhận và QR check-in qua tin nhắn Zalo.
         </Text>
 
-        {/* Hiển thị mã booking */}
         <div className="bg-gray-100 rounded-lg p-4 mb-6">
           <Text className="font-semibold text-gray-800">
             Mã đơn đặt sân: <span className="text-indigo-600">{bookingId}</span>
           </Text>
         </div>
 
-        {/* Tổng tiền (nếu có từ state) */}
         {totalPrice > 0 && (
           <Text className="text-xl font-bold text-indigo-700 mb-6">
             Tổng thanh toán: {totalPrice.toLocaleString('vi-VN')}đ
           </Text>
         )}
 
-        {/* Địa chỉ sân (hardcode hoặc từ state nếu có) */}
+        {selectedSlots.length > 0 && (
+          <div className="bg-gray-50 rounded-lg p-4 mb-8 text-left">
+            <Text className="font-semibold mb-3">Các khung giờ đã đặt:</Text>
+            {selectedSlots.map((slot: any, index: number) => (
+              <div key={index} className="mb-2">
+                <Text className="font-medium">
+                  {dayjs(slot.date).format('DD/MM/YYYY')} - {slot.time}
+                </Text>
+                <Text className="text-sm text-gray-600">
+                  {slot.price.toLocaleString('vi-VN')}đ
+                </Text>
+              </div>
+            ))}
+          </div>
+        )}
+
         <div className="mb-8">
           <Text.Title className="text-xl font-semibold text-gray-800 mb-2">
             Địa chỉ sân: PES Pickleball Center
@@ -69,7 +85,6 @@ const SuccessPage: React.FC = () => {
           </Text>
         </div>
 
-        {/* Các quy định & hướng dẫn check-in */}
         <div className="space-y-6 mb-8">
           <div className="bg-white shadow-md rounded-xl p-6">
             <Text.Title className="text-xl font-semibold text-indigo-800 mb-4">
@@ -100,7 +115,6 @@ const SuccessPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Nút hành động */}
         <div className="flex flex-col gap-4">
           <Button color="primary" fullWidth onClick={() => navigate('/my-bookings')}>
             Xem lịch đặt sân của tôi

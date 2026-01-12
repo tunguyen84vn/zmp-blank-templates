@@ -19,23 +19,28 @@ interface Slot {
 const SUCCESS_DATA_KEY = 'pes_success_data';
 const SUCCESS_LOCK_KEY = 'pes_success_locked';
 const FINAL_SLOTS_KEY = 'pes_final_slots';
+const LAST_BOOKING_ID_KEY = 'last_booking_id';
+
+const REDIRECT_PATH = '/payment-result';
 
 const SummaryPage: React.FC = () => {
   const navigate = useNavigate();
   
   const [selectedSlots, setSelectedSlots] = useAtom(selectedSlotsAtom);
 
-  // Ref để lấy selectedSlots mới nhất (tránh closure cũ trong useEffect)
+  // Ref để lấy selectedSlots mới nhất
   const latestSelectedSlots = useRef(selectedSlots);
 
-  // Cập nhật ref mỗi khi selectedSlots thay đổi
   useEffect(() => {
     latestSelectedSlots.current = selectedSlots;
   }, [selectedSlots]);
 
-  const REDIRECT_PATH = '/payment-result';
+  // Clear final slots khi vào lại trang (tránh dữ liệu cũ sót lại)
+  useEffect(() => {
+    localStorage.removeItem(FINAL_SLOTS_KEY);
+    localStorage.removeItem(LAST_BOOKING_ID_KEY);
+  }, []);
 
-  // Hàm lưu success data chỉ 1 lần
   const saveSuccessDataOnce = (successData: any) => {
     if (localStorage.getItem(SUCCESS_LOCK_KEY)) {
       console.log('Success data đã bị lock, bỏ qua overwrite');
@@ -45,19 +50,19 @@ const SummaryPage: React.FC = () => {
     localStorage.setItem(SUCCESS_LOCK_KEY, 'true');
     console.log('Lưu successData lần đầu thành công:', successData);
     
-    // Tự động xóa sau 10 phút
     setTimeout(() => {
       localStorage.removeItem(SUCCESS_LOCK_KEY);
       localStorage.removeItem(SUCCESS_DATA_KEY);
       localStorage.removeItem(FINAL_SLOTS_KEY);
+      localStorage.removeItem(LAST_BOOKING_ID_KEY);
     }, 600000);
   };
 
-  // Hàm xóa tất cả key temp khi fail/hủy
   const clearTempKeys = () => {
     localStorage.removeItem(SUCCESS_LOCK_KEY);
     localStorage.removeItem(SUCCESS_DATA_KEY);
     localStorage.removeItem(FINAL_SLOTS_KEY);
+    localStorage.removeItem(LAST_BOOKING_ID_KEY);
     console.log('Đã xóa temp keys do fail/hủy thanh toán');
   };
 
@@ -71,26 +76,54 @@ const SummaryPage: React.FC = () => {
 
         Payment.checkTransaction({
           data: path,
-          success: (rs) => {
+          success: async (rs) => {
             console.log('checkTransaction from OpenApp success:', rs);
 
             if (rs.resultCode === 1 || rs.msg?.toLowerCase().includes('thành công')) {
-              showToast({ message: `Thanh toán thành công! Mã giao dịch: ${rs.transId || rs.orderId || 'N/A'}` });
-              
-              const storedFinal = localStorage.getItem(FINAL_SLOTS_KEY);
-              const finalSlots = storedFinal ? JSON.parse(storedFinal) : latestSelectedSlots.current;
-              
-              const successData = {
-                transId: rs.transId || rs.orderId || 'N/A',
-                totalPrice: finalSlots.reduce((sum, slot) => sum + slot.price, 0),
-                selectedSlots: [...finalSlots],
-              };
-              
-              saveSuccessDataOnce(successData);
-              
-              navigate('/success', { state: successData });
-              setSelectedSlots([]);
-              localStorage.removeItem(FINAL_SLOTS_KEY);
+              try {
+                const userId = '3368637342326461234'; // Hardcode tạm - nên thay bằng Zalo SDK sau
+                const transId = rs.transId || rs.orderId || 'N/A';
+                const bookingIdFromLocal = localStorage.getItem(LAST_BOOKING_ID_KEY) || '';
+
+                showToast({ message: 'Thanh toán thành công! Đang lấy chi tiết đơn hàng...' });
+
+                const response = await fetch(
+                  `https://pes-pickleball-backend.vercel.app/api/get-booking?userId=${userId}&transId=${transId}&bookingId=${bookingIdFromLocal}`
+                );
+                const result = await response.json();
+
+                let successData;
+
+                if (result.success && result.booking) {
+                  successData = {
+                    bookingId: result.booking.booking_id,
+                    totalPrice: result.booking.totalPrice,
+                    selectedSlots: result.booking.selectedSlots,
+                  };
+                } else {
+                  // Fallback nếu server không trả được
+                  console.warn('Không lấy được dữ liệu từ server, dùng fallback local');
+                  const storedFinal = localStorage.getItem(FINAL_SLOTS_KEY);
+                  const finalSlots = storedFinal ? JSON.parse(storedFinal) : latestSelectedSlots.current;
+                  
+                  successData = {
+                    bookingId: transId,
+                    totalPrice: finalSlots.reduce((sum: number, slot: Slot) => sum + slot.price, 0),
+                    selectedSlots: [...finalSlots],
+                  };
+                }
+
+                showToast({ message: `Thanh toán thành công! Mã giao dịch: ${transId}` });
+                
+                saveSuccessDataOnce(successData);
+                navigate('/success', { state: successData });
+                setSelectedSlots([]);
+                localStorage.removeItem(LAST_BOOKING_ID_KEY);
+              } catch (err) {
+                console.error('Fetch booking error after success:', err);
+                showToast({ message: 'Lỗi lấy chi tiết đơn hàng từ server' });
+                clearTempKeys();
+              }
             } else if (rs.resultCode === 0) {
               showToast({ message: 'Giao dịch đang xử lý, vui lòng chờ...' });
               setTimeout(() => Payment.checkTransaction({ data: path }), 8000);
@@ -115,6 +148,9 @@ const SummaryPage: React.FC = () => {
       if (resultCode === 1) {
         showToast({ message: 'Thanh toán thành công (từ PaymentClose)' });
         
+        // Tương tự logic fetch như handleOpenApp
+        // Để giữ nguyên cấu trúc cũ, bạn có thể copy phần try-catch fetch từ trên vào đây nếu cần
+        // Hiện tại giữ fallback cũ như code gốc
         const storedFinal = localStorage.getItem(FINAL_SLOTS_KEY);
         const finalSlots = storedFinal ? JSON.parse(storedFinal) : latestSelectedSlots.current;
         
@@ -131,7 +167,7 @@ const SummaryPage: React.FC = () => {
         localStorage.removeItem(FINAL_SLOTS_KEY);
       } else {
         showToast({ message: resultCode === 0 ? 'Giao dịch đang xử lý' : 'Thanh toán bị hủy hoặc thất bại' });
-        clearTempKeys(); // Quan trọng: xóa key khi hủy
+        clearTempKeys();
       }
     };
 
@@ -142,7 +178,7 @@ const SummaryPage: React.FC = () => {
       events.off(EventName.OpenApp, handleOpenApp);
       events.off(EventName.PaymentClose, handlePaymentClose);
     };
-  }, [navigate]);
+  }, [navigate, setSelectedSlots]);
 
   if (selectedSlots.length === 0) {
     return (
@@ -195,7 +231,6 @@ const SummaryPage: React.FC = () => {
         return;
       }
 
-      // Xóa key cũ trước khi lưu mới (đảm bảo giỏ hàng hiện tại là final)
       localStorage.removeItem(FINAL_SLOTS_KEY);
       localStorage.setItem(FINAL_SLOTS_KEY, JSON.stringify(selectedSlots));
 
@@ -219,6 +254,9 @@ const SummaryPage: React.FC = () => {
       if (!data.success) throw new Error(data.error || 'Create order failed');
 
       const { mac, orderId: merchantOrderId } = data;
+
+      // Lưu bookingId để dùng fallback nếu cần
+      localStorage.setItem(LAST_BOOKING_ID_KEY, merchantOrderId);
 
       Payment.createOrder({
         desc: 'Đặt sân Pickleball',
@@ -248,74 +286,13 @@ const SummaryPage: React.FC = () => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ bookingId: merchantOrderId, zaloOrderId })
           }).catch(err => console.error('Update zaloOrderId error:', err));
-
-          checkTransactionStatus();
         },
         fail: (err) => {
           console.log('SDK createOrder fail:', err);
           showToast({ message: 'Tạo đơn hàng thất bại!' });
           clearTempKeys();
-          checkTransactionStatus();
         }
       });
-
-      let retryCount = 0;
-      const MAX_RETRY = 5;
-
-      const checkTransactionStatus = () => {
-        const queryParams = new URLSearchParams(window.location.search);
-        const paramsObj: Record<string, string> = {};
-        queryParams.forEach((value, key) => {
-          paramsObj[key] = value;
-        });
-
-        if (Object.keys(paramsObj).length === 0) {
-          showToast({ message: 'Không có tham số trả về, đang chờ sự kiện...' });
-          return;
-        }
-
-        Payment.checkTransaction({
-          data: paramsObj,
-          success: (rs) => {
-            console.log('checkTransaction success:', rs);
-            if (rs.resultCode === 1) {
-              showToast({ message: `Thanh toán thành công! Mã giao dịch: ${rs.transId || 'N/A'}` });
-              
-              const storedFinal = localStorage.getItem(FINAL_SLOTS_KEY);
-              const finalSlots = storedFinal ? JSON.parse(storedFinal) : latestSelectedSlots.current;
-              
-              const successData = {
-                transId: rs.transId || 'N/A',
-                totalPrice: finalSlots.reduce((sum, slot) => sum + slot.price, 0),
-                selectedSlots: [...finalSlots],
-              };
-              
-              saveSuccessDataOnce(successData);
-              
-              navigate('/success', { state: successData });
-              setSelectedSlots([]);
-              localStorage.removeItem(FINAL_SLOTS_KEY);
-            } else if (rs.resultCode === 0) {
-              if (retryCount < MAX_RETRY) {
-                retryCount++;
-                showToast({ message: `Giao dịch đang xử lý (${retryCount}/${MAX_RETRY}), vui lòng chờ...` });
-                setTimeout(checkTransactionStatus, 8000); // 8 giây
-              } else {
-                showToast({ message: 'Giao dịch xử lý lâu, vui lòng kiểm tra lại sau.' });
-                clearTempKeys();
-              }
-            } else {
-              showToast({ message: `Thanh toán thất bại: ${rs.msg || 'Lỗi không xác định'}` });
-              clearTempKeys();
-            }
-          },
-          fail: (err) => {
-            console.error('checkTransaction fail:', err);
-            showToast({ message: 'Không thể kiểm tra trạng thái giao dịch' });
-            clearTempKeys();
-          }
-        });
-      };
     } catch (err) {
       console.error('Payment error:', err);
       showToast({ message: 'Lỗi thanh toán, thử lại!' });
