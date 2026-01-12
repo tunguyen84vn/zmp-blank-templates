@@ -27,15 +27,12 @@ const SummaryPage: React.FC = () => {
   const navigate = useNavigate();
   
   const [selectedSlots, setSelectedSlots] = useAtom(selectedSlotsAtom);
-
-  // Ref để lấy selectedSlots mới nhất
   const latestSelectedSlots = useRef(selectedSlots);
 
   useEffect(() => {
     latestSelectedSlots.current = selectedSlots;
   }, [selectedSlots]);
 
-  // Clear final slots khi vào lại trang (tránh dữ liệu cũ sót lại)
   useEffect(() => {
     localStorage.removeItem(FINAL_SLOTS_KEY);
     localStorage.removeItem(LAST_BOOKING_ID_KEY);
@@ -81,7 +78,7 @@ const SummaryPage: React.FC = () => {
 
             if (rs.resultCode === 1 || rs.msg?.toLowerCase().includes('thành công')) {
               try {
-                const userId = '3368637342326461234'; // Hardcode tạm - nên thay bằng Zalo SDK sau
+                const userId = '3368637342326461234';
                 const transId = rs.transId || rs.orderId || 'N/A';
                 const bookingIdFromLocal = localStorage.getItem(LAST_BOOKING_ID_KEY) || '';
 
@@ -101,8 +98,6 @@ const SummaryPage: React.FC = () => {
                     selectedSlots: result.booking.selectedSlots,
                   };
                 } else {
-                  // Fallback nếu server không trả được
-                  console.warn('Không lấy được dữ liệu từ server, dùng fallback local');
                   const storedFinal = localStorage.getItem(FINAL_SLOTS_KEY);
                   const finalSlots = storedFinal ? JSON.parse(storedFinal) : latestSelectedSlots.current;
                   
@@ -148,9 +143,6 @@ const SummaryPage: React.FC = () => {
       if (resultCode === 1) {
         showToast({ message: 'Thanh toán thành công (từ PaymentClose)' });
         
-        // Tương tự logic fetch như handleOpenApp
-        // Để giữ nguyên cấu trúc cũ, bạn có thể copy phần try-catch fetch từ trên vào đây nếu cần
-        // Hiện tại giữ fallback cũ như code gốc
         const storedFinal = localStorage.getItem(FINAL_SLOTS_KEY);
         const finalSlots = storedFinal ? JSON.parse(storedFinal) : latestSelectedSlots.current;
         
@@ -222,7 +214,7 @@ const SummaryPage: React.FC = () => {
 
   const handlePayment = async () => {
     try {
-      const userId = '3368637342326461234'; // Hardcode tạm
+      const userId = '3368637342326461234'; // Hardcode tạm - thay bằng Zalo SDK sau
       const phone = '0901234567';
       const name = 'User Name';
 
@@ -231,10 +223,34 @@ const SummaryPage: React.FC = () => {
         return;
       }
 
+      // === BƯỚC MỚI: Reserve slots trước thanh toán ===
+      const tempBookingId = crypto.randomUUID(); // Sinh ID tạm để reserve
+
+      const reserveResponse = await fetch('https://pes-pickleball-backend.vercel.app/api/reserve-slots', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          selectedSlots,
+          tempBookingId
+        })
+      });
+
+      const reserveData = await reserveResponse.json();
+
+      if (!reserveData.success) {
+        showToast({ message: reserveData.error || 'Slot đã được đặt bởi người khác, vui lòng chọn lại!' });
+        return; // Dừng flow thanh toán
+      }
+
+      showToast({ message: 'Đã giữ chỗ thành công trong 15 phút! Đang chuyển thanh toán...' });
+
+      // Lưu FINAL_SLOTS_KEY như cũ
       localStorage.removeItem(FINAL_SLOTS_KEY);
       localStorage.setItem(FINAL_SLOTS_KEY, JSON.stringify(selectedSlots));
 
-      const orderId = globalThis.crypto.randomUUID();
+      // Sinh orderId và gọi create-order
+      const orderId = crypto.randomUUID();
 
       const response = await fetch('https://pes-pickleball-backend.vercel.app/api/create-order', {
         method: 'POST',
@@ -255,7 +271,6 @@ const SummaryPage: React.FC = () => {
 
       const { mac, orderId: merchantOrderId } = data;
 
-      // Lưu bookingId để dùng fallback nếu cần
       localStorage.setItem(LAST_BOOKING_ID_KEY, merchantOrderId);
 
       Payment.createOrder({
