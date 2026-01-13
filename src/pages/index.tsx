@@ -234,6 +234,13 @@ const HomePage = () => {
 
       {/* Fixed Đặt sân button */}
       <div className="sticky bottom-0 bg-white p-4 border-t shadow-lg">
+              <Button
+          variant="secondary"  // Màu phụ, không lấn át
+          fullWidth
+          onClick={() => navigate('/my-bookings')}
+        >
+          Xem lịch đặt sân của tôi
+        </Button>
         <Button
           color="primary"
           onClick={handleBook}
