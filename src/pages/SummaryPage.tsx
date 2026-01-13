@@ -38,6 +38,26 @@ const SummaryPage: React.FC = () => {
     localStorage.removeItem(LAST_BOOKING_ID_KEY);
   }, []);
 
+  // === MỚI: Hủy reserve cũ khi quay lại trang ===
+  useEffect(() => {
+    const cancelPreviousReserve = async () => {
+      const userId = '3368637342326461234'; // Hardcode tạm - thay bằng Zalo SDK sau
+
+      try {
+        await fetch('https://pes-pickleball-backend.vercel.app/api/cancel-reserve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId })
+        });
+        console.log('Đã hủy giữ chỗ cũ khi quay lại trang');
+      } catch (err) {
+        console.error('Hủy reserve error:', err);
+      }
+    };
+
+    cancelPreviousReserve();
+  }, []); // Chỉ chạy khi mount
+
   const saveSuccessDataOnce = (successData: any) => {
     if (localStorage.getItem(SUCCESS_LOCK_KEY)) {
       console.log('Success data đã bị lock, bỏ qua overwrite');
@@ -194,20 +214,60 @@ const SummaryPage: React.FC = () => {
   const totalSlots = selectedSlots.length;
   const totalPrice = selectedSlots.reduce((sum, slot) => sum + slot.price, 0);
 
+  // === MỚI: Hủy reserve cũ khi remove slot ===
   const removeSlot = (removedSlot: Slot) => {
     const updatedSlots = selectedSlots.filter(s => !(s.id === removedSlot.id && s.date === removedSlot.date));
     setSelectedSlots(updatedSlots);
     showToast({ message: 'Đã bỏ slot!' });
+
+    // Hủy reserve cũ khi chỉnh sửa
+    const cancelPreviousReserve = async () => {
+      const userId = '3368637342326461234';
+
+      try {
+        await fetch('https://pes-pickleball-backend.vercel.app/api/cancel-reserve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId })
+        });
+        console.log('Đã hủy giữ chỗ cũ khi remove slot');
+      } catch (err) {
+        console.error('Hủy reserve error:', err);
+      }
+    };
+
+    cancelPreviousReserve();
+
     if (updatedSlots.length === 0) {
       showToast({ message: 'Giỏ hàng rỗng, quay về chọn lại!' });
       navigate(-1);
     }
   };
 
+  // === MỚI: Hủy reserve cũ khi clear cart ===
   const clearCart = () => {
     if (window.confirm('Bạn có chắc chắn muốn xóa TOÀN BỘ giỏ hàng?\nHành động này không thể hoàn tác.')) {
       setSelectedSlots([]);
       showToast({ message: 'Đã xóa toàn bộ giỏ hàng' });
+
+      // Hủy reserve cũ khi clear
+      const cancelPreviousReserve = async () => {
+        const userId = '3368637342326461234';
+
+        try {
+          await fetch('https://pes-pickleball-backend.vercel.app/api/cancel-reserve', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId })
+          });
+          console.log('Đã hủy giữ chỗ cũ khi clear cart');
+        } catch (err) {
+          console.error('Hủy reserve error:', err);
+        }
+      };
+
+      cancelPreviousReserve();
+
       navigate(-1);
     }
   };
@@ -224,15 +284,12 @@ const SummaryPage: React.FC = () => {
       }
 
       // === BƯỚC MỚI: Reserve slots trước thanh toán ===
-      const tempBookingId = crypto.randomUUID(); // Sinh ID tạm để reserve
-
       const reserveResponse = await fetch('https://pes-pickleball-backend.vercel.app/api/reserve-slots', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userId,
-          selectedSlots,
-          tempBookingId
+          selectedSlots
         })
       });
 
@@ -241,6 +298,14 @@ const SummaryPage: React.FC = () => {
       if (!reserveData.success) {
         showToast({ message: reserveData.error || 'Slot đã được đặt bởi người khác, vui lòng chọn lại!' });
         return; // Dừng flow thanh toán
+      }
+
+      // === LƯU bookingId từ reserve để dùng sau nếu cần (tùy chọn) ===
+      if (reserveData.bookingId) {
+        localStorage.setItem('temp_reserved_bookingId', reserveData.bookingId);
+        console.log('Đã lưu temp_reserved_bookingId:', reserveData.bookingId);
+      } else {
+        console.warn('Không nhận được bookingId từ reserve API');
       }
 
       showToast({ message: 'Đã giữ chỗ thành công trong 15 phút! Đang chuyển thanh toán...' });
