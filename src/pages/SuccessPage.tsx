@@ -75,10 +75,10 @@ const SuccessPage: React.FC = () => {
 
         <div className="mb-8">
           <Text.Title className="text-xl font-semibold text-gray-800 mb-2">
-            Địa chỉ sân: PES Pickleball Center
+            Địa chỉ sân: PES Pickleball
           </Text.Title>
           <Text className="text-gray-600">
-            123 Đường ABC, Quận 1, TP. Hồ Chí Minh
+            số 239 Đường Nguyễn Trãi, Phường Tân Ninh, Tây Ninh
           </Text>
           <Text className="text-sm text-gray-500 mt-1">
             (Vui lòng kiểm tra tin nhắn Zalo để xác nhận địa chỉ chính xác)
