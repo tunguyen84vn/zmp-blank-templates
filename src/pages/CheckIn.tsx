@@ -1,188 +1,141 @@
 import React, { useEffect, useState } from 'react';
-import { Page, Text, Icon, Spinner, Button, Box, List } from 'zmp-ui';
-import { useLocation, useNavigate } from 'react-router-dom';
-import { getAccessToken } from 'zmp-sdk/apis'; 
+import { Page, Text, Icon, Button, Box, Header, useNavigate, useLocation } from 'zmp-ui';
+import { getAccessToken, showToast } from 'zmp-sdk/apis'; 
+import dayjs from 'dayjs';
 
 const CheckInPage: React.FC = () => {
-  const [status, setStatus] = useState<'loading' | 'success' | 'fail'>('loading');
-  const [errorCode, setErrorCode] = useState<string>(''); // Lưu mã lỗi để hiển thị hướng dẫn
-  const [message, setMessage] = useState('Đang kết nối hệ thống...');
-  
-  const location = useLocation();
   const navigate = useNavigate();
+  const location = useLocation();
 
-  // Hàm xử lý check-in
-  const processCheckIn = async () => {
+  // Nhận dữ liệu từ trang MyBookings truyền sang
+  const { bookingId, slotInfo } = location.state || {};
+
+  // Các trạng thái của quá trình Check-in
+  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'fail'>('idle');
+  const [message, setMessage] = useState('');
+
+  // Nếu người dùng vào trang này mà không có dữ liệu (vd: vào trực tiếp), hiển thị mặc định
+  useEffect(() => {
+    if (!bookingId || !slotInfo) {
+        setStatus('fail');
+        setMessage('Không tìm thấy thông tin vé. Vui lòng quay lại danh sách.');
+    }
+  }, [bookingId, slotInfo]);
+
+  // Hàm gọi API mở cổng
+  const handleConfirmCheckIn = async () => {
     setStatus('loading');
-    setMessage('Đang xác thực danh tính...');
-    setErrorCode('');
-
+    
     try {
-      // 1. Lấy thông tin từ URL và Zalo SDK
-      const searchParams = new URLSearchParams(location.search);
-      const courtId = searchParams.get('courtId') || '1';
+      const accessToken = await getAccessToken({}); // Xác thực user
       
-      const accessToken = await getAccessToken({}); // Token định danh người dùng
-
-      // 2. Gọi API Backend
+      // Gọi API Backend
+      // Lưu ý: Backend cần xử lý việc nhận bookingId và mở cổng tương ứng
       const res = await fetch('https://pes-pickleball-backend.vercel.app/api/check-in', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ accessToken, courtId })
+          body: JSON.stringify({ 
+              accessToken, 
+              bookingId: bookingId,
+              // courtId: '1' // Nếu slotInfo có thông tin sân thì truyền vào, không thì backend tự dò
+          })
       });
 
       const data = await res.json();
 
-      // 3. Xử lý kết quả
       if (data.success) {
           setStatus('success');
-          setMessage(data.message);
       } else {
           setStatus('fail');
-          setErrorCode(data.code || 'UNKNOWN'); // Lưu mã lỗi (VD: NO_BOOKING)
-          setMessage(data.error || 'Lỗi không xác định');
+          setMessage(data.error || 'Check-in thất bại. Vui lòng thử lại.');
       }
-
-    } catch (err: any) {
-      console.error(err);
+    } catch (error) {
+      console.error(error);
       setStatus('fail');
-      setErrorCode('NETWORK_ERROR');
-      setMessage('Lỗi kết nối mạng. Vui lòng thử lại.');
+      setMessage('Lỗi kết nối mạng. Kiểm tra internet của bạn.');
     }
   };
 
-  // Gọi hàm check-in ngay khi vào trang
-  useEffect(() => {
-    processCheckIn();
-  }, []);
+  // --- RENDER GIAO DIỆN ---
 
-  // --- COMPONENT: HIỂN THỊ HƯỚNG DẪN KHI GẶP LỖI ---
-  const renderErrorInstruction = () => {
-    // Trường hợp 1: Không tìm thấy lịch đặt (Sai tài khoản hoặc sai ngày)
-    if (errorCode === 'NO_BOOKING') {
-      return (
-        <Box className="bg-orange-50 p-4 rounded-lg mt-4 border border-orange-200 text-left">
-          <Text.Title size="small" className="text-orange-700 mb-2 font-bold">
-            💡 Gợi ý khắc phục:
-          </Text.Title>
-          <List>
-            <div className="flex gap-3 mb-3 items-start">
-              <Icon icon="zi-user-solid" className="text-orange-500 mt-1" />
-              <div className="flex-1">
-                <Text size="small" className="font-semibold text-gray-700">Sai tài khoản Zalo?</Text>
-                <Text size="xxSmall" className="text-gray-500">
-                  Vui lòng kiểm tra xem bạn có đang dùng đúng tài khoản Zalo đã đặt sân không.
-                </Text>
-              </div>
-            </div>
-            <div className="flex gap-3 items-start">
-              <Icon icon="zi-calendar-solid" className="text-orange-500 mt-1" />
-              <div className="flex-1">
-                <Text size="small" className="font-semibold text-gray-700">Nhầm ngày?</Text>
-                <Text size="xxSmall" className="text-gray-500">
-                  Hệ thống chỉ mở cổng cho lịch đặt của ngày hôm nay.
-                </Text>
-              </div>
-            </div>
-          </List>
-        </Box>
-      );
-    }
-
-    // Trường hợp 2: Sai khung giờ (Đến quá sớm hoặc quá trễ)
-    if (errorCode === 'WRONG_TIME') {
-      return (
-        <Box className="bg-blue-50 p-4 rounded-lg mt-4 border border-blue-200 text-left">
-          <Text.Title size="small" className="text-blue-700 mb-2 font-bold">
-            ⏰ Quy định giờ vào sân:
-          </Text.Title>
-          <List>
-            <div className="flex gap-3 mb-3 items-start">
-              <Icon icon="zi-clock-1" className="text-blue-500 mt-1" />
-              <div className="flex-1">
-                <Text size="small" className="font-semibold text-gray-700">Sớm nhất:</Text>
-                <Text size="xxSmall" className="text-gray-500">
-                  Bạn được vào trước <b>60 phút</b> so với giờ bắt đầu.
-                </Text>
-              </div>
-            </div>
-            <div className="flex gap-3 items-start">
-              <Icon icon="zi-clock-2" className="text-blue-500 mt-1" />
-              <div className="flex-1">
-                <Text size="small" className="font-semibold text-gray-700">Muộn nhất:</Text>
-                <Text size="xxSmall" className="text-gray-500">
-                  Cổng vẫn mở cho đến khi <b>hết giờ</b> thuê sân.
-                </Text>
-              </div>
-            </div>
-          </List>
-          <Text size="xxSmall" className="text-gray-500 mt-3 italic text-center">
-            (Ví dụ: Đặt 18h-20h. Bạn có thể check-in từ 17h00 đến 19h59)
-          </Text>
-        </Box>
-      );
-    }
-
-    return null;
-  };
-
-  // --- RENDER GIAO DIỆN CHÍNH ---
-  return (
-    <Page className="flex flex-col items-center justify-center min-h-screen bg-white p-6">
-      
-      {/* 1. TRẠNG THÁI LOADING */}
-      {status === 'loading' && (
-        <Box className="flex flex-col items-center">
-            <Spinner visible logo="https://stc-zalotech.zg.vn/static/media/zalo-icon.7d5743b1.svg" />
-            <Text className="mt-4 text-gray-500 font-medium animate-pulse">Đang kết nối cổng thông minh...</Text>
-        </Box>
-      )}
-      
-      {/* 2. TRẠNG THÁI THÀNH CÔNG */}
-      {status === 'success' && (
-        <div className="text-center w-full animate-fadeIn">
-            <div className="bg-green-100 w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6 shadow-sm">
-                <Icon icon="zi-unlock-solid" className="text-green-600 text-5xl"/>
-            </div>
-            <Text.Title className="text-green-600 text-2xl font-bold mb-2">MỞ CỔNG THÀNH CÔNG</Text.Title>
-            <Text className="text-gray-600 mb-6 font-medium">{message}</Text>
-            
-            <div className="bg-gray-50 p-4 rounded-xl border border-dashed border-gray-300">
-                <Text size="small" className="text-gray-500 leading-5">
-                    💡 <b>Mẹo:</b> Nếu bạn bè đến sau, bạn chỉ cần ra cổng và quét mã này một lần nữa để mở cửa cho họ.
-                </Text>
-            </div>
-
-            <Button className="mt-8 w-full shadow-lg" size="large" onClick={() => navigate('/')}>
-                Về Trang Chủ
-            </Button>
-        </div>
-      )}
-
-      {/* 3. TRẠNG THÁI THẤT BẠI */}
-      {status === 'fail' && (
-        <div className="w-full animate-fadeIn">
-            <div className="text-center mb-6">
-                <div className="bg-red-50 w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-4 shadow-sm">
-                    <Icon icon="zi-close" className="text-red-500 text-5xl"/>
+  const renderContent = () => {
+    if (status === 'success') {
+        return (
+            <div className="text-center animate-fadeIn">
+                <div className="w-24 h-24 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <Icon icon="zi-check" className="text-green-600 text-5xl" />
                 </div>
-                <Text.Title className="text-red-600 text-xl font-bold">KHÔNG THỂ VÀO SÂN</Text.Title>
-                <Text className="text-gray-800 font-medium mt-2 px-4">{message}</Text>
+                <Text.Title className="text-xl font-bold text-green-700 mb-2">CHECK-IN THÀNH CÔNG</Text.Title>
+                <Text className="text-gray-600 mb-6">Cổng đã mở! Chúc bạn có buổi chơi vui vẻ.</Text>
+                
+                <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 mb-6 text-left">
+                    <Text className="text-xs text-gray-500 uppercase font-bold">Thời gian chơi</Text>
+                    <Text className="text-lg font-semibold text-blue-600">{slotInfo?.time}</Text>
+                </div>
+
+                <Button fullWidth onClick={() => navigate('/')}>Về trang chủ</Button>
+            </div>
+        );
+    }
+
+    if (status === 'fail') {
+        return (
+            <div className="text-center">
+                <div className="w-24 h-24 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <Icon icon="zi-close" className="text-red-600 text-5xl" />
+                </div>
+                <Text.Title className="text-xl font-bold text-red-600 mb-2">RẤT TIẾC</Text.Title>
+                <Text className="text-gray-600 mb-6">{message}</Text>
+                <Button fullWidth onClick={() => navigate('/my-bookings')}>Quay lại danh sách</Button>
+            </div>
+        );
+    }
+
+    // Trạng thái mặc định (Idle) hoặc Loading
+    return (
+        <div className="flex flex-col h-full justify-between">
+            <div className="text-center mt-4">
+                <Text.Title className="text-xl font-bold text-gray-800 mb-1">Xác Nhận Check-in</Text.Title>
+                <Text className="text-gray-500 text-sm">Vui lòng xác nhận thông tin trước khi vào sân</Text>
+                
+                {/* Card thông tin vé */}
+                <div className="mt-8 bg-white border border-blue-200 shadow-lg shadow-blue-50 rounded-2xl p-6 relative overflow-hidden">
+                    <div className="absolute top-0 left-0 w-full h-2 bg-blue-500"></div>
+                    
+                    <div className="flex justify-between items-center mb-4 border-b border-dashed border-gray-200 pb-4">
+                        <span className="text-gray-500 text-sm">Ngày chơi</span>
+                        <span className="font-bold text-gray-800">{slotInfo ? dayjs(slotInfo.date).format('DD/MM/YYYY') : '--'}</span>
+                    </div>
+                    
+                    <div className="flex justify-between items-center mb-2">
+                        <span className="text-gray-500 text-sm">Giờ bắt đầu</span>
+                        <span className="font-bold text-blue-600 text-xl">{slotInfo?.time.split('h')[0]}:00</span>
+                    </div>
+                </div>
             </div>
 
-            {/* Hiển thị bảng hướng dẫn (Troubleshooting) */}
-            {renderErrorInstruction()}
-
-            <div className="flex gap-3 mt-8">
-                <Button variant="secondary" fullWidth onClick={() => navigate('/')}>
-                    Về trang chủ
+            <div className="pb-6">
+                <Button 
+                    fullWidth 
+                    size="large"
+                    loading={status === 'loading'}
+                    onClick={handleConfirmCheckIn}
+                    className="mb-3 bg-blue-600 shadow-xl shadow-blue-200"
+                >
+                    {status === 'loading' ? 'Đang mở cổng...' : 'Mở Cổng Ngay'}
                 </Button>
-                <Button variant="primary" fullWidth onClick={processCheckIn}>
-                    Thử lại
-                </Button>
+                <Button variant="tertiary" fullWidth onClick={() => navigate(-1)}>Hủy bỏ</Button>
             </div>
         </div>
-      )}
+    );
+  };
+
+  return (
+    <Page className="bg-white flex flex-col h-screen">
+      <Header title="Check-in Vào Sân" showBackIcon={true} />
+      <div className="flex-1 p-6">
+        {renderContent()}
+      </div>
     </Page>
   );
 };
