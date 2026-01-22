@@ -3,14 +3,14 @@ import { Page, List, Button, Text, Icon, Modal, Box } from 'zmp-ui';
 import { useNavigate } from 'zmp-ui';
 import dayjs from 'dayjs';
 
-// Import các API từ Zalo SDK
+// Import đầy đủ API SDK, bao gồm getAccessToken mới thêm
 import { 
   showToast, 
   Payment, 
   events, 
   EventName, 
   getPhoneNumber, 
-  getAccessToken, 
+  getAccessToken, // [UPDATE]: Cần thiết để gọi backend
   getUserInfo 
 } from 'zmp-sdk/apis';
 
@@ -22,6 +22,8 @@ const SUCCESS_LOCK_KEY = 'pes_success_locked';
 const FINAL_SLOTS_KEY = 'pes_final_slots';
 const LAST_BOOKING_ID_KEY = 'last_booking_id';
 const REDIRECT_PATH = '/payment-result';
+// [UPDATE]: Định nghĩa URL backend chuẩn để dùng chung
+const BACKEND_URL = 'https://pes-pickleball-backend.vercel.app';
 
 const SummaryPage: React.FC = () => {
   const navigate = useNavigate();
@@ -50,7 +52,7 @@ const SummaryPage: React.FC = () => {
   const cancelPreviousReserve = async (userIdToCheck: string) => {
     if (!userIdToCheck) return;
     try {
-      await fetch('https://pes-pickleball-backend.vercel.app/api/cancel-reserve', {
+      await fetch(`${BACKEND_URL}/api/cancel-reserve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: userIdToCheck })
@@ -94,7 +96,7 @@ const SummaryPage: React.FC = () => {
     console.log('Đã xóa temp keys do fail/hủy thanh toán');
   };
 
-  // === Xử lý sự kiện OpenApp và PaymentClose ===
+  // === Xử lý sự kiện OpenApp và PaymentClose (GIỮ NGUYÊN CODE CỦA BẠN) ===
   useEffect(() => {
     const handleOpenApp = (data: any) => {
       console.log('OpenApp event received:', data);
@@ -118,7 +120,7 @@ const SummaryPage: React.FC = () => {
                 showToast({ message: 'Thanh toán thành công! Đang lấy chi tiết...' });
 
                 const response = await fetch(
-                  `https://pes-pickleball-backend.vercel.app/api/get-booking?userId=${currentUserId}&transId=${transId}&bookingId=${bookingIdFromLocal}`
+                  `${BACKEND_URL}/api/get-booking?userId=${currentUserId}&transId=${transId}&bookingId=${bookingIdFromLocal}`
                 );
                 const result = await response.json();
 
@@ -222,14 +224,17 @@ const SummaryPage: React.FC = () => {
   // LOGIC THANH TOÁN
   // ==========================================================
 
-  // 1. Hàm tạo Order và gọi ZaloPay (Được gọi sau khi đã xác định Phone)
-  // [FIX]: Chấp nhận kiểu string | null | undefined để tránh lỗi TypeScript
+  // 1. Hàm tạo Order và gọi ZaloPay
+  // [UPDATE]: Nhận finalPhone có thể là null/undefined
   const createOrderAndPay = async (finalPhone: string | null | undefined) => {
     try {
       const currentUserId = user.id;
       const currentUserName = user.name; 
+      
+      // [UPDATE]: Xử lý phone gửi lên backend (gửi null nếu không có)
+      const phoneToSend = finalPhone || null;
 
-      console.log('[Step] Creating Order with phone:', finalPhone || 'GUEST');
+      console.log('[Step] Creating Order with phone:', phoneToSend || 'GUEST');
       
       localStorage.setItem(FINAL_SLOTS_KEY, JSON.stringify(selectedSlots));
       
@@ -237,12 +242,12 @@ const SummaryPage: React.FC = () => {
       const totalPrice = selectedSlots.reduce((sum, s) => sum + s.price, 0);
 
       // Gọi API create-order
-      const response = await fetch('https://pes-pickleball-backend.vercel.app/api/create-order', {
+      const response = await fetch(`${BACKEND_URL}/api/create-order`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userId: currentUserId,
-          phone: finalPhone, // Backend sẽ nhận null nếu finalPhone là null/undefined
+          phone: phoneToSend, 
           name: currentUserName, 
           selectedSlots,
           amount: totalPrice.toString(),
@@ -264,8 +269,8 @@ const SummaryPage: React.FC = () => {
         amount: totalPrice.toString(),
         extradata: JSON.stringify({
           userId: currentUserId,
-          // [FIX]: Đảm bảo luôn là string khi gọi SDK
-          phone: finalPhone || '', 
+          // [UPDATE]: Đảm bảo phone là string khi gửi vào extradata
+          phone: phoneToSend || '', 
           name: currentUserName,
           notes: 'Extra data from booking'
         }),
@@ -275,7 +280,7 @@ const SummaryPage: React.FC = () => {
           console.log('[Success] Zalo Payment Order Created:', res);
           showToast({ message: 'Đang chuyển sang thanh toán...' });
           
-          fetch('https://pes-pickleball-backend.vercel.app/api/update-zalo-orderid', {
+          fetch(`${BACKEND_URL}/api/update-zalo-orderid`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ bookingId: data.orderId, zaloOrderId: res.orderId })
@@ -285,6 +290,7 @@ const SummaryPage: React.FC = () => {
           console.error('[Error] Zalo Payment SDK Failed:', err);
           showToast({ message: 'Tạo thanh toán thất bại: ' + (err.message || 'Lỗi SDK') });
           clearTempKeys();
+          setIsProcessing(false); // [UPDATE]: Reset processing flag
         }
       });
 
@@ -292,24 +298,42 @@ const SummaryPage: React.FC = () => {
       console.error('[Error] Payment Flow Exception:', err);
       showToast({ message: 'Có lỗi xảy ra: ' + err.message });
       clearTempKeys();
-    } finally {
-      setIsProcessing(false); // Kết thúc xử lý
+      setIsProcessing(false); // [UPDATE]: Reset processing flag
     }
   };
 
-  // 2. Xử lý khi bấm nút "Đăng ký" ở Modal
+  // 2. Xử lý khi bấm nút "Đồng ý" ở Modal
+  // [UPDATE QUAN TRỌNG]: Sửa lỗi bất đồng bộ và đóng modal sớm
   const handleModalRegister = async () => {
-    setVisiblePhoneModal(false); // Đóng modal
-    showToast({ message: 'Đang lấy thông tin...' });
+    // KHÔNG đóng modal ngay tại đây để tránh mất user gesture context
+    // setVisiblePhoneModal(false); <-- Bỏ dòng này
+    setIsProcessing(true); // Bật loading
+    showToast({ message: 'Đang kết nối Zalo...' });
 
-    // [FIX]: Khai báo kiểu rõ ràng để có thể gán null
-    let finalPhone: string | null | undefined = user.phone;
+    let finalPhone: string | null = null;
 
     try {
-      const { token: phoneToken } = await getPhoneNumber({});
+      // 1. Gọi API lấy Token SĐT từ Zalo SDK (Promise wrapper)
+      const phoneRes = await new Promise<any>((resolve, reject) => {
+        getPhoneNumber({
+          success: (data) => resolve(data),
+          fail: (err) => reject(err)
+        });
+      });
+
+      const { token: phoneToken } = phoneRes;
+      console.log('[Zalo SDK] Phone Token received');
+
+      if (!phoneToken) {
+          throw new Error('Token SĐT bị rỗng');
+      }
+
+      // 2. Lấy Access Token
       const accessToken = await getAccessToken({});
-      
-      const updateRes = await fetch('https://pes-pickleball-backend.vercel.app/api/update-phone', {
+      console.log('[Zalo SDK] Access Token received');
+
+      // 3. Gọi Backend để giải mã
+      const updateRes = await fetch(`${BACKEND_URL}/api/update-phone`, {
           method: 'POST',
           headers: { 
               'Content-Type': 'application/json', 
@@ -319,23 +343,30 @@ const SummaryPage: React.FC = () => {
       });
       
       const phoneData = await updateRes.json();
-      if (phoneData.success) {
+      
+      if (phoneData.success && phoneData.phone) {
           finalPhone = phoneData.phone;
-          // Cập nhật state nếu thành công
           setUser(prev => ({ ...prev, phone: phoneData.phone })); 
-          console.log('[Info] Phone updated:', finalPhone);
+          showToast({ message: 'Lấy SĐT thành công!' });
       } else {
-          // Nếu lỗi API, fallback về Guest (null)
-          console.warn('Update phone failed, fallback to Guest');
-          finalPhone = null;
+          console.error('[Backend Error] Update phone failed:', phoneData);
+          showToast({ message: 'Lỗi server: ' + (phoneData.error || 'Không giải mã được') });
       }
-    } catch (err) {
-      // Nếu user từ chối cấp quyền hoặc lỗi SDK -> Fallback về Guest (null)
-      console.warn('User denied phone permission or SDK error. Using Guest mode.');
-      finalPhone = null;
+
+    } catch (err: any) {
+      console.error('[Zalo SDK Error] Detail:', err);
+      if (err.code === -1001 || (err.message && err.message.includes('User denied'))) {
+          showToast({ message: 'Bạn cần cấp quyền SĐT để tiếp tục' });
+      } else {
+          showToast({ message: `Lỗi Zalo: ${err.message || err.code}` });
+      }
+      // Vẫn tiếp tục với guest mode
     }
 
-    // Tiếp tục thanh toán
+    // Đóng modal SAU KHI đã xử lý xong (dù thành công hay thất bại)
+    setVisiblePhoneModal(false);
+    
+    // Tiếp tục thanh toán với SĐT lấy được (hoặc null)
     createOrderAndPay(finalPhone);
   };
 
@@ -372,7 +403,7 @@ const SummaryPage: React.FC = () => {
 
       // --- BƯỚC 2: Reserve Slots (Giữ chỗ) ---
       console.log('[Step] Reserving slots...');
-      const reserveResponse = await fetch('https://pes-pickleball-backend.vercel.app/api/reserve-slots', {
+      const reserveResponse = await fetch(`${BACKEND_URL}/api/reserve-slots`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: currentUserId, selectedSlots })
@@ -388,16 +419,13 @@ const SummaryPage: React.FC = () => {
       showToast({ message: 'Đã giữ chỗ thành công!' });
 
       // --- BƯỚC 3: KIỂM TRA SỐ ĐIỆN THOẠI ---
-      // Nếu chưa có (null hoặc rỗng) -> Hiện Modal
-      const isPhoneMissing = !user.phone;
-
-      if (isPhoneMissing) {
-        setVisiblePhoneModal(true);
-        // Lưu ý: Không set isProcessing = false ở đây, giữ trạng thái loading đến khi Modal xử lý xong
-      } else {
-        // Đã có phone xịn -> Thanh toán luôn
-        // [FIX]: Hàm createOrderAndPay giờ đã nhận kiểu undefined nên không bị lỗi ở đây nữa
+      // Nếu user đã có phone -> Thanh toán luôn
+      if (user.phone) {
         createOrderAndPay(user.phone);
+      } else {
+        // Chưa có -> Tắt processing tạm thời để hiện modal
+        setIsProcessing(false); 
+        setVisiblePhoneModal(true);
       }
 
     } catch (err: any) {
@@ -437,6 +465,7 @@ const SummaryPage: React.FC = () => {
           Xác nhận đặt sân Pickleball
         </Text.Title>
 
+        {/* [KEEP]: Giữ nguyên thông tin sân */}
         <div className="bg-white rounded-xl shadow-md p-4 mb-6">
           <div className="flex items-center mb-3">
             <Icon icon="zi-location-solid" className="text-blue-600 mr-3 text-2xl" />
@@ -513,45 +542,38 @@ const SummaryPage: React.FC = () => {
         </Text>
       </div>
 
-      {/* --- MODAL XIN SỐ ĐIỆN THOẠI (DESIGN MỚI - CHUYÊN NGHIỆP) --- */}
+      {/* --- MODAL XIN SỐ ĐIỆN THOẠI (DESIGN MỚI - GIỮ UI CỦA BẠN) --- */}
       <Modal
         visible={visiblePhoneModal}
-        // Xóa các props mặc định 'title', 'actions' để tự do thiết kế
         onClose={() => {
             setVisiblePhoneModal(false);
-            // Nếu đóng (bấm ra ngoài) -> Coi như khách vãng lai
             console.log('User đóng Modal -> Guest Mode');
             createOrderAndPay(null); 
         }}
         maskClosable={false}
       >
         <Box className="flex flex-col items-center p-2">
-            {/* 1. ICON MINH HỌA */}
             <div className="bg-blue-50 p-4 rounded-full mb-4">
                 <Icon icon="zi-call-solid" className="text-blue-600 text-5xl" />
             </div>
 
-            {/* 2. TIÊU ĐỀ */}
             <Text.Title className="text-xl font-bold text-gray-800 mb-2 text-center">
                 Chúng tôi cần số điện thoại của bạn
             </Text.Title>
 
-            {/* 3. MÔ TẢ */}
             <Text className="text-gray-500 text-center mb-6 text-base leading-relaxed">
                 Chúng tôi cần số điện thoại của bạn để đăng ký thành viên, xác nhận đặt sân.
             </Text>
 
-            {/* 4. BUTTON CHÍNH: ĐỒNG Ý */}
             <Button
                 fullWidth
                 size="large"
-                onClick={handleModalRegister}
+                onClick={handleModalRegister} // [UPDATE]: Gọi hàm mới
                 className="mb-4 bg-blue-600 hover:bg-blue-700 shadow-lg font-semibold"
             >
                 Đồng ý & Tiếp tục
             </Button>
 
-            {/* 5. LINK PHỤ: BỎ QUA */}
             <div 
                 onClick={() => {
                     setVisiblePhoneModal(false);
@@ -579,7 +601,7 @@ const SummaryPage: React.FC = () => {
         <Button
           color="primary"
           fullWidth
-          loading={isProcessing} // Hiện loading khi đang xử lý
+          loading={isProcessing} 
           onClick={handlePaymentInitiate}
           className="flex-1"
         >
